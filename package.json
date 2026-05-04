@@ -1,0 +1,21 @@
+{
+  "name": "playwright-self-heal-agent",
+  "version": "1.0.0",
+  "main": "dist/register.js",
+  "types": "dist/register.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.0.0",
+    "playwright-self-heal-agent": "file:playwright-self-heal-agent-1.0.0.tgz"
+  },
+  "peerDependencies": {
+    "@playwright/test": ">=1.40.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^5.0.0"
+  }
+}
