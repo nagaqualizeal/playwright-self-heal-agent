@@ -1,16 +1,58 @@
-import { Page } from '@playwright/test';
+import { Page, Locator } from '@playwright/test';
 import { handleHealing } from './healer';
 
 let actionCounter = 0;
+// Track all registered pages by their context
+const pagesByContext = new Map<any, Page>();
+// Keep track of the most recently patched page as fallback
+let lastPatchedPage: Page | null = null;
+let isLocatorProtoPatched = false;
+
+// ================= HELPER FUNCTION FOR TEST NAME =================
+function extractTestName(page: Page): string {
+  // Try multiple ways to get test info from Playwright context
+  const testInfo = (page as any)._testInfo || (page as any).__testInfo;
+  
+  // Method 1: Direct testInfo properties
+  if (testInfo) {
+    const title = testInfo.title || '';
+    const file = testInfo.file || testInfo.fileName || '';
+    const suite = testInfo.suite || '';
+    
+    if (title || file) {
+      // Extract just the filename from full path
+      const fileName = file ? file.split(/[/\\]/).pop() : '';
+      const parts = [];
+      if (fileName) parts.push(`[${fileName}]`);
+      if (title) parts.push(title);
+      if (suite && suite !== title) parts.push(`(${suite})`);
+      return parts.length > 0 ? parts.join(' ') : 'unknown-test';
+    }
+  }
+  
+  // Method 2: Try to get from current test context
+  try {
+    const context = (page as any).context?.();
+    const contextInfo = context?._testInfo || context?.testInfo;
+    if (contextInfo?.title) {
+      return contextInfo.title;
+    }
+  } catch (e) {
+    // Continue to next method
+  }
+  
+  // Fallback
+  return 'unknown-test';
+}
 
 export function patchPage(page: Page) {
 
-  const getTestName = () => {
-  const info = (page as any).__testInfo;
-return info
-  ? `${info.suite} → ${info.title}`
-  : 'unknown-test';
-};
+  const getTestName = () => extractTestName(page);
+
+  // Store page reference by its context so we can find it later
+  const context = page.context();
+  pagesByContext.set(context, page);
+  lastPatchedPage = page; // Keep track of most recent page for fallback
 
   // ================= PAGE LEVEL PATCH =================
 
@@ -21,39 +63,27 @@ return info
     const actionId = ++actionCounter;
     const testName = getTestName();
 
-    
-
     try {
-      const count = await page.locator(selector).count();
+      // Let Playwright wait up to 30 seconds for element to appear
+      return await originalClick(selector, { timeout: 30000 });
 
-      if (count === 0) {
-        console.log(`⚠️ [${actionId}] Element not found immediately → healing triggered`);
+    } catch (error: any) {
+      console.log(`⚠️ [${actionId}] Page.click failed after 30s timeout → healing triggered`);
 
+      try {
         return await handleHealing(
           page,
           selector,
           'click',
           [],
-          null,
+          error,
           actionId,
           testName
         );
+      } catch (healingError: any) {
+        console.log(`❌ [${actionId}] Healing error: ${healingError?.message || healingError}`);
+        throw error;
       }
-
-      return await originalClick(selector, { timeout: 2000 });
-
-    } catch (error: any) {
-      console.log(`⚠️ [${actionId}] Page.click failed → healing triggered`);
-
-      return await handleHealing(
-        page,
-        selector,
-        'click',
-        [],
-        error,
-        actionId,
-        testName
-      );
     }
   };
 
@@ -61,130 +91,146 @@ return info
     const actionId = ++actionCounter;
     const testName = getTestName();
 
-  
-
     try {
-      const count = await page.locator(selector).count();
+      // Let Playwright wait up to 30 seconds for element to appear
+      return await originalFill(selector, value, { timeout: 30000 });
 
-      if (count === 0) {
-        console.log(`⚠️ [${actionId}] Element not found immediately → healing triggered`);
+    } catch (error: any) {
+      console.log(`⚠️ [${actionId}] Page.fill failed after 30s timeout → healing triggered`);
 
+      try {
         return await handleHealing(
           page,
           selector,
           'fill',
           [value],
-          null,
+          error,
           actionId,
           testName
         );
+      } catch (healingError: any) {
+        console.log(`❌ [${actionId}] Healing error: ${healingError?.message || healingError}`);
+        throw error;
       }
-
-      return await originalFill(selector, value, { timeout: 2000 });
-
-    } catch (error: any) {
-      console.log(`⚠️ [${actionId}] Page.fill failed → healing triggered`);
-
-      return await handleHealing(
-        page,
-        selector,
-        'fill',
-        [value],
-        error,
-        actionId,
-        testName
-      );
     }
   };
 
-  // ================= LOCATOR LEVEL PATCH =================
+  // ================= LOCATOR LEVEL PATCH (Global, but smart about page detection) =================
 
-  const locatorProto = Object.getPrototypeOf(page.locator('body'));
+  // Only patch once - all pages will use the same patched prototype
+  if (!isLocatorProtoPatched) {
+    const locatorProto = Object.getPrototypeOf(page.locator('body'));
 
-  const originalLocatorFill = locatorProto.fill;
-  const originalLocatorClick = locatorProto.click;
+    const originalLocatorFill = locatorProto.fill;
+    const originalLocatorClick = locatorProto.click;
 
-  locatorProto.fill = async function (value: string, options?: any) {
-    const actionId = ++actionCounter;
-    const testName = getTestName();
+    // Helper: Find the page for a locator by checking its context and internal properties
+    const getPageForLocator = (locator: Locator): Page | null => {
+      // Try to access page from locator's internal _page property
+      const locatorInternal = (locator as any);
+      if (locatorInternal._page) {
+        // Found page directly in locator
+        return locatorInternal._page;
+      }
+      
+      // Try to access context from locator and find matching page
+      if (locatorInternal._context) {
+        const storedPage = pagesByContext.get(locatorInternal._context);
+        if (storedPage) return storedPage;
+      }
+      
+      // Fallback: check all registered pages
+      for (const [context, registeredPage] of pagesByContext.entries()) {
+        if (registeredPage && registeredPage.isClosed && !registeredPage.isClosed()) {
+          return registeredPage;
+        }
+      }
+      
+      // Last resort: use the most recently patched page
+      if (lastPatchedPage && !lastPatchedPage.isClosed()) {
+        return lastPatchedPage;
+      }
+      
+      return null;
+    };
 
-    const selector = (this as any)._selector || 'unknown-locator';
-
-    try {
-      // 🔥 EARLY CHECK (IMPORTANT FIX)
-      const count = await this.count();
-
-      if (count === 0) {
-        console.log(`⚠️ [${actionId}] Element not found immediately → healing triggered`);
-
-        return await handleHealing(
-          page,
-          selector,
-          'fill',
-          [value],
-          null,
-          actionId,
-          testName
-        );
+    locatorProto.fill = async function (value: string, options?: any) {
+      const actionId = ++actionCounter;
+      
+      // Get the page from this locator at runtime
+      let pageForHealing = getPageForLocator(this as any);
+      if (!pageForHealing) {
+        // No page found - this shouldn't happen in normal usage
+        console.warn(`[${actionId}] ⚠️ WARNING: Could not determine page for locator`);
+        // Let the error propagate naturally without healing
+        return await originalLocatorFill.call(this, value, { timeout: 30000 });
       }
 
-      return await originalLocatorFill.call(this, value, { timeout: 2000 });
+      const testName = extractTestName(pageForHealing);
+      const selector = (this as any)._selector || 'unknown-locator';
 
-    } catch (error: any) {
-      console.log(`⚠️ [${actionId}] Locator.fill failed → healing triggered`);
+      try {
+        // Let Playwright wait up to 30 seconds for element to appear
+        return await originalLocatorFill.call(this, value, { timeout: 30000 });
 
-      return await handleHealing(
-        page,
-        selector,
-        'fill',
-        [value],
-        error,
-        actionId,
-        testName
-      );
-    }
-  };
+      } catch (error: any) {
+        console.log(`⚠️ [${actionId}] Locator.fill failed after 30s timeout → healing triggered`);
 
-  locatorProto.click = async function (options?: any) {
-    const actionId = ++actionCounter;
-    const testName = getTestName();
+        try {
+          return await handleHealing(
+            pageForHealing,
+            selector,
+            'fill',
+            [value],
+            error,
+            actionId,
+            testName
+          );
+        } catch (healingError: any) {
+          console.log(`❌ [${actionId}] Healing error: ${healingError?.message || healingError}`);
+          throw error;
+        }
+      }
+    };
 
-    const selector = (this as any)._selector || 'unknown-locator';
-
-    
-
-    try {
-      // 🔥 EARLY CHECK (IMPORTANT FIX)
-      const count = await this.count();
-
-      if (count === 0) {
-        console.log(`⚠️ [${actionId}] Element not found immediately → healing triggered`);
-
-        return await handleHealing(
-          page,
-          selector,
-          'click',
-          [],
-          null,
-          actionId,
-          testName
-        );
+    locatorProto.click = async function (options?: any) {
+      const actionId = ++actionCounter;
+      
+      // Get the page from this locator at runtime
+      let pageForHealing = getPageForLocator(this as any);
+      if (!pageForHealing) {
+        // No page found - let it fail naturally
+        console.warn(`[${actionId}] ⚠️ WARNING: Could not determine page for locator`);
+        return await originalLocatorClick.call(this, { timeout: 30000 });
       }
 
-      return await originalLocatorClick.call(this, { timeout: 2000 });
+      const testName = extractTestName(pageForHealing);
+      const selector = (this as any)._selector || 'unknown-locator';
 
-    } catch (error: any) {
-      console.log(`⚠️ [${actionId}] Locator.click failed → healing triggered`);
+      try {
+        // Let Playwright wait up to 30 seconds for element to appear
+        return await originalLocatorClick.call(this, { timeout: 30000 });
 
-      return await handleHealing(
-        page,
-        selector,
-        'click',
-        [],
-        error,
-        actionId,
-        testName
-      );
-    }
-  };
+      } catch (error: any) {
+        console.log(`⚠️ [${actionId}] Locator.click failed after 30s timeout → healing triggered`);
+
+        try {
+          return await handleHealing(
+            pageForHealing,
+            selector,
+            'click',
+            [],
+            error,
+            actionId,
+            testName
+          );
+        } catch (healingError: any) {
+          console.log(`❌ [${actionId}] Healing error: ${healingError?.message || healingError}`);
+          throw error;
+        }
+      }
+    };
+
+    isLocatorProtoPatched = true;
+  }
 }

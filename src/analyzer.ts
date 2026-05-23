@@ -3,6 +3,7 @@ export function analyzeError(error: any): string {
 
   if (msg.includes('strict mode violation')) return 'locator';
   if (msg.includes('not found')) return 'locator';
+  if (msg.includes('timeout') || msg.includes('Timeout')) return 'locator';  // ✅ Add timeout detection
 
   // 🔥 NEW: handle null case (pre-check scenario)
   if (!error) return 'locator';
