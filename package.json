@@ -8,8 +8,7 @@
   },
   "dependencies": {
     "axios": "^1.6.0",
-    "dotenv": "^16.0.0",
-    "playwright-self-heal-agent": "file:playwright-self-heal-agent-1.0.0.tgz"
+    "dotenv": "^16.0.0"
   },
   "peerDependencies": {
     "@playwright/test": ">=1.40.0"
