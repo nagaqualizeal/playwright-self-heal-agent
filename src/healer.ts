@@ -651,5 +651,6 @@ async function executeAction(locator: any, action: string, args: any[]) {
   if (action === 'click') return await locator.first().click({ timeout: 1000 });
   if (action === 'fill') return await locator.first().fill(args[0], { timeout: 1000 });
   if (action === 'waitFor') return await locator.first().waitFor(args[0]);
+  if (action === 'scrollIntoViewIfNeeded') return await locator.first().scrollIntoViewIfNeeded(args[0]);
   throw new Error(`Unsupported action: ${action}`);
 }

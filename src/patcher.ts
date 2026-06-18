@@ -115,6 +115,35 @@ export function patchPage(page: Page) {
     }
   };
 
+  (page as any).waitForElementVisible = async (selector: string, options?: any) => {
+    const actionId = ++actionCounter;
+    const testName = getTestName();
+
+    try {
+      // Use Playwright's built-in wait with timeout
+      const locator = page.locator(selector);
+      return await locator.waitFor({ state: 'visible', timeout: 30000, ...options });
+
+    } catch (error: any) {
+      console.log(`⚠️ [${actionId}] Page.waitForElementVisible failed after 30s timeout → healing triggered`);
+
+      try {
+        return await handleHealing(
+          page,
+          selector,
+          'waitFor',
+          [{ state: 'visible', ...options }],
+          error,
+          actionId,
+          testName
+        );
+      } catch (healingError: any) {
+        console.log(`❌ [${actionId}] Healing error: ${healingError?.message || healingError}`);
+        throw error;
+      }
+    }
+  };
+
   // ================= LOCATOR LEVEL PATCH (Global, but smart about page detection) =================
 
   // Only patch once - all pages will use the same patched prototype
@@ -123,6 +152,8 @@ export function patchPage(page: Page) {
 
     const originalLocatorFill = locatorProto.fill;
     const originalLocatorClick = locatorProto.click;
+    const originalLocatorWaitFor = locatorProto.waitFor;
+    const originalLocatorScrollIntoViewIfNeeded = locatorProto.scrollIntoViewIfNeeded;
 
     // Helper: Find the page for a locator by checking its context and internal properties
     const getPageForLocator = (locator: Locator): Page | null => {
@@ -220,6 +251,80 @@ export function patchPage(page: Page) {
             selector,
             'click',
             [],
+            error,
+            actionId,
+            testName
+          );
+        } catch (healingError: any) {
+          console.log(`❌ [${actionId}] Healing error: ${healingError?.message || healingError}`);
+          throw error;
+        }
+      }
+    };
+
+    locatorProto.waitFor = async function (options?: any) {
+      const actionId = ++actionCounter;
+      
+      // Get the page from this locator at runtime
+      let pageForHealing = getPageForLocator(this as any);
+      if (!pageForHealing) {
+        console.warn(`[${actionId}] ⚠️ WARNING: Could not determine page for locator`);
+        return await originalLocatorWaitFor.call(this, options);
+      }
+
+      const testName = extractTestName(pageForHealing);
+      const selector = (this as any)._selector || 'unknown-locator';
+
+      try {
+        // Call waitFor with provided options (state, timeout, etc.)
+        return await originalLocatorWaitFor.call(this, options);
+
+      } catch (error: any) {
+        console.log(`⚠️ [${actionId}] Locator.waitFor failed → healing triggered`);
+
+        try {
+          return await handleHealing(
+            pageForHealing,
+            selector,
+            'waitFor',
+            [options],
+            error,
+            actionId,
+            testName
+          );
+        } catch (healingError: any) {
+          console.log(`❌ [${actionId}] Healing error: ${healingError?.message || healingError}`);
+          throw error;
+        }
+      }
+    };
+
+    locatorProto.scrollIntoViewIfNeeded = async function (options?: any) {
+      const actionId = ++actionCounter;
+      
+      // Get the page from this locator at runtime
+      let pageForHealing = getPageForLocator(this as any);
+      if (!pageForHealing) {
+        console.warn(`[${actionId}] ⚠️ WARNING: Could not determine page for locator`);
+        return await originalLocatorScrollIntoViewIfNeeded.call(this, options);
+      }
+
+      const testName = extractTestName(pageForHealing);
+      const selector = (this as any)._selector || 'unknown-locator';
+
+      try {
+        // Call scrollIntoViewIfNeeded with provided options
+        return await originalLocatorScrollIntoViewIfNeeded.call(this, options);
+
+      } catch (error: any) {
+        console.log(`⚠️ [${actionId}] Locator.scrollIntoViewIfNeeded failed → healing triggered`);
+
+        try {
+          return await handleHealing(
+            pageForHealing,
+            selector,
+            'scrollIntoViewIfNeeded',
+            [options],
             error,
             actionId,
             testName

@@ -177,3 +177,169 @@ npm install /path/to/playwright-self-heal-agent-1.0.0.tgz
 5. **Monitor** - Check healing reports to verify improvements
 
 The agent is now **truly generic** - it handles attribute/tag/value changes automatically!
+
+---
+
+# Version 3.0.0 - Extended Action Support
+
+## 📋 New Files/Methods Added
+
+### **1. UPDATED: src/patcher.ts**
+Added support for `waitFor()` and `scrollIntoViewIfNeeded()` patching with self-heal.
+
+**New Locator Methods Patched:**
+- `Locator.prototype.waitFor(options)` - Explicit element visibility/state waiting
+- `Locator.prototype.scrollIntoViewIfNeeded(options)` - Scroll element into view
+- `Page.waitForElementVisible(selector, options)` - Helper method for visibility
+
+**Key Design:**
+- Each method has its own independent self-heal try/catch block
+- **NO CONFLICTS** with click/fill - completely separate healing paths
+- If `waitFor` fails → triggers element healing → retries `waitFor` with new locator
+- If `click` fails → completely separate healing → retries `click` with new locator
+
+### **2. UPDATED: src/healer.ts**
+Extended `executeAction()` to support new action types.
+
+**Changes:**
+```typescript
+async function executeAction(locator: any, action: string, args: any[]) {
+  if (action === 'click') return await locator.first().click({ timeout: 1000 });
+  if (action === 'fill') return await locator.first().fill(args[0], { timeout: 1000 });
+  if (action === 'waitFor') return await locator.first().waitFor(args[0]);
+  if (action === 'scrollIntoViewIfNeeded') return await locator.first().scrollIntoViewIfNeeded(args[0]);
+  throw new Error(`Unsupported action: ${action}`);
+}
+```
+
+---
+
+## 🎯 How It Works (No Code Changes Needed!)
+
+### **Your Existing Code:**
+```typescript
+async openBallotFolder(ballotFolderName: string) {
+  await test.step(`Open ballot folder: ${ballotFolderName}`, async () => {
+    const folder = this.ballotFolder(ballotFolderName);
+    
+    // These now ALL have automatic self-heal! (NO CHANGES NEEDED)
+    await folder.waitFor({ state: "visible" });      // ← Self-heal if fails!
+    await folder.scrollIntoViewIfNeeded();            // ← Self-heal if fails!
+    await folder.click();                             // ← Self-heal if fails!
+    
+    await this.page.waitForTimeout(5000);
+    await PlaywrightUtils.takeScreenshot(this.page, "", `Opened: ${ballotFolderName}`);
+  });
+}
+```
+
+**What happens when `waitFor` fails:**
+1. User calls: `await folder.waitFor({ state: "visible" })`
+2. Playwright waits for element (default 30s)
+3. Fails (element changed tag/attribute/value)
+4. Our patch catches error
+5. **Self-heal triggers:**
+   - Analyzes original selector
+   - Finds element with multi-strategy approach
+   - Retries `waitFor` with new locator
+   - Returns success or logs healing attempt
+6. If still fails, throws original error
+7. Next action (e.g., `click`) can still proceed with same locator in many cases
+
+**What happens when `click` fails (different from waitFor):**
+- Completely separate try/catch block
+- Uses same healing logic as waitFor
+- Retry click with healed locator
+- No cascade of timeouts - one healing per action
+
+---
+
+## ✅ No Conflicts Between Actions
+
+### **Scenario: Element that changes HTML**
+```
+HTML before:  <button title="Open">
+              ↓ User interaction triggers re-render
+HTML after:   <span role="button" data-testid="Open">
+
+Test code:
+await folder.waitFor({ state: "visible" });  // Uses button selector
+await folder.click();                         // Same selector
+```
+
+**Execution Flow:**
+```
+waitFor() called
+  ↓
+Try: page.locator('button').waitFor()
+  ↓
+❌ Fails (HTML changed to span)
+  ↓
+🔧 Healing triggered for waitFor
+  - Finds span element with matching attributes
+  - Retries: page.locator('span[@role=button]').waitFor()
+  ✅ Success!
+  ↓
+click() called  (separate method)
+  ↓
+Try: original selector on button (same as before)
+  ↓
+❌ May fail (still button selector, but HTML changed)
+  ↓
+🔧 Healing triggered for click (independent!)
+  - Finds same span element again
+  - Retries: page.locator('span[@role=button]').click()
+  ✅ Success!
+```
+
+**Result: Both actions work, zero conflicts, appropriate timeouts**
+
+---
+
+## 📊 Action Support Matrix
+
+| Action | Patching | Self-Heal | Conflicts | Notes |
+|--------|----------|-----------|-----------|-------|
+| `click()` | ✅ v1.0.0+ | ✅ v1.0.0+ | None | Primary action |
+| `fill()` | ✅ v1.0.0+ | ✅ v1.0.0+ | None | Text input action |
+| `waitFor()` | ✅ v3.0.0+ | ✅ v3.0.0+ | None | Explicit wait (NEW) |
+| `scrollIntoViewIfNeeded()` | ✅ v3.0.0+ | ✅ v3.0.0+ | None | Visibility prep (NEW) |
+
+---
+
+## 🧪 Real-World Example: Ballot Folder Opening
+
+### **Before v3.0.0:**
+```typescript
+const folder = this.ballotFolder(ballotFolderName);
+
+// Built-in Playwright waits
+await folder.click();  // ← Only this had self-heal
+```
+
+**Problem:** If `waitFor` or `scrollIntoViewIfNeeded` needed to be explicit, they had no healing.
+
+### **With v3.0.0:**
+```typescript
+const folder = this.ballotFolder(ballotFolderName);
+
+// All have self-heal! No code changes needed.
+await folder.waitFor({ state: "visible" });     // ✅ New in v3
+await folder.scrollIntoViewIfNeeded();           // ✅ New in v3
+await folder.click();                            // ✅ Existing
+```
+
+**Benefits:**
+- ✅ More resilient to dynamic DOM changes
+- ✅ Explicit waits are now safe and auto-healing
+- ✅ No timeout cascades
+- ✅ Each action independently heals if needed
+- ✅ **Zero code changes in your test files**
+
+---
+
+## 🚀 Version Summary
+
+**v1.0.0**: Basic click/fill self-heal with simple tag-based extraction  
+**v2.0.0**: Smart locator parsing with 5-strategy fallback (tag changes, attribute changes, value changes)  
+**v3.0.0**: Extended to waitFor/scrollIntoViewIfNeeded (complete action coverage) + fixed circular dependency
