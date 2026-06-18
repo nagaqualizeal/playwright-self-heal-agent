@@ -6,6 +6,7 @@ import { getLLMSuggestions } from './llmClient';
 import { resolveLocator } from './resolver';
 import { validateLocator, ValidationMode } from './validator';
 import { logHealing } from './reporter';
+import { extractLocatorIntent, findTargetElement, extractElementDetails, generateSelectorSuggestions } from './locatorParser';
 
 const cacheFile = path.resolve('.selfheal-cache.json');
 
@@ -294,96 +295,40 @@ export async function handleHealing(
       } else {
         console.log(`   ⚠️  Failed locator not found on page (0 matches)`);
         
-        // ✅ NEW: Find SIMILAR elements in aria-snapshot and extract their attributes
+        // ✅ NEW: Use smart locator parser to find target element with fallback strategies
         try {
-          console.log(`\n   🔍 === EXTRACTING SIMILAR ELEMENTS FROM SNAPSHOT ===`);
+          console.log(`\n   🔍 === SMART ELEMENT SEARCH WITH FALLBACKS ===`);
           
-          // Determine what type of element we're looking for
-          let elementType = 'any';
-          if (originalSelector.includes('button') || originalSelector.toLowerCase().includes('button')) {
-            elementType = 'button';
-          } else if (originalSelector.includes('input') || originalSelector.includes('[type') || originalSelector.includes('password') || originalSelector.includes('textbox')) {
-            elementType = 'input';
-          } else if (originalSelector.includes('a[') || originalSelector.includes('link')) {
-            elementType = 'link';
-          }
+          // Parse the locator to extract search intent (attribute name, value, text content, etc.)
+          const intent = extractLocatorIntent(originalSelector);
+          console.log(`   Extracted intent:`, intent);
           
-          console.log(`   Target element type: ${elementType}`);
+          // Use fallback strategies to find the target element
+          const searchResult = await findTargetElement(page, originalSelector, intent);
           
-          // Extract similar elements from aria-snapshot
-          let similarElementsInSnapshot: any[] = [];
-          if (elementType === 'button' && ariaSnapshot.includes('button')) {
-            const buttonMatches = ariaSnapshot.match(/button[^:]*:\s*"([^"]*)"[^}]*/gi) || [];
-            similarElementsInSnapshot = buttonMatches.slice(0, 5).map((m, i) => ({
-              type: 'button',
-              text: m.match(/"([^"]*)"/)?.[1] || 'N/A',
-              fullMatch: m
-            }));
-          } else if (elementType === 'input' && (ariaSnapshot.includes('textbox') || ariaSnapshot.includes('searchbox'))) {
-            const inputMatches = ariaSnapshot.match(/(textbox|searchbox|combobox)[^:]*:\s*"([^"]*)"[^}]*/gi) || [];
-            similarElementsInSnapshot = inputMatches.slice(0, 5).map((m, i) => ({
-              type: m.match(/(textbox|searchbox|combobox)/i)?.[1] || 'input',
-              text: m.match(/"([^"]*)"/)?.[1] || 'N/A',
-              fullMatch: m
-            }));
-          }
-          
-          if (similarElementsInSnapshot.length > 0) {
-            console.log(`   Found ${similarElementsInSnapshot.length} similar element(s) in aria-snapshot:`);
-            similarElementsInSnapshot.forEach((el, i) => {
-              console.log(`      [${i + 1}] ${el.type}: "${el.text}"`);
+          if (searchResult) {
+            console.log(`\n   ✅ FOUND target element using strategy: ${searchResult.strategy}`);
+            if (searchResult.note) {
+              console.log(`   ℹ️  Note: ${searchResult.note}`);
+            }
+            
+            elementDetails.similarElementsOnDOM = searchResult.details;
+            elementDetails.searchStrategy = searchResult.strategy;
+            elementDetails.searchXpath = searchResult.xpath;
+            
+            // Log found element details
+            searchResult.details.forEach((detail: any, idx: number) => {
+              console.log(`      [${idx + 1}] <${detail.tag}> ${detail.text}, id="${detail.id}", role="${detail.role}"`);
+              console.log(`           Possible selectors: ${generateSelectorSuggestions(detail).slice(0, 3).join(' | ')}`);
             });
-            elementDetails.similarElementsInSnapshot = similarElementsInSnapshot;
+          } else {
+            console.log(`\n   ⚠️  Could not find target element using any fallback strategy`);
+            console.log(`   ℹ️  Attempt ID: ${actionId} - Element may have been removed or significantly changed`);
           }
           
-          // Get all elements of that type from DOM and extract their attributes
-          let similarElementsOnDOM: any[] = [];
-          
-          if (elementType === 'button') {
-            const allButtons = await page.locator('button').all();
-            console.log(`   Found ${allButtons.length} button(s) on page:`);
-            for (let i = 0; i < Math.min(allButtons.length, 10); i++) {
-              const btn = allButtons[i];
-              const attrs = await btn.evaluate((el: any) => ({
-                text: el.textContent?.slice(0, 50) || '',
-                id: el.id || null,
-                className: el.className || '',
-                ariaLabel: el.getAttribute('aria-label') || null,
-                name: el.getAttribute('name') || null,
-                dataTestId: el.getAttribute('data-testid') || null,
-                dataTest: el.getAttribute('data-test') || null,
-                dataId: el.getAttribute('data-id') || null,
-                role: el.getAttribute('role') || 'button'
-              }));
-              console.log(`      [${i + 1}] ${attrs.role}: text="${attrs.text}", id="${attrs.id}", aria-label="${attrs.ariaLabel}", data-testid="${attrs.dataTestId}"`);
-              similarElementsOnDOM.push(attrs);
-            }
-          } else if (elementType === 'input') {
-            const allInputs = await page.locator('input').all();
-            console.log(`   Found ${allInputs.length} input(s) on page:`);
-            for (let i = 0; i < Math.min(allInputs.length, 10); i++) {
-              const input = allInputs[i];
-              const attrs = await input.evaluate((el: any) => ({
-                type: el.type || 'text',
-                placeholder: el.placeholder || null,
-                id: el.id || null,
-                className: el.className || '',
-                name: el.getAttribute('name') || null,
-                dataTestId: el.getAttribute('data-testid') || null,
-                dataTest: el.getAttribute('data-test') || null,
-                dataId: el.getAttribute('data-id') || null,
-                ariaLabel: el.getAttribute('aria-label') || null,
-                value: el.value?.slice(0, 30) || null
-              }));
-              console.log(`      [${i + 1}] input[type="${attrs.type}"]: placeholder="${attrs.placeholder}", id="${attrs.id}", name="${attrs.name}", data-testid="${attrs.dataTestId}"`);
-              similarElementsOnDOM.push(attrs);
-            }
-          }
-          
-          elementDetails.similarElementsOnDOM = similarElementsOnDOM;
-          console.log(`   === END SIMILAR ELEMENTS ===\n`);
+          console.log(`   === END SMART SEARCH ===\n`);
         } catch (e) {
-          console.log(`   ⚠️  Similar element extraction failed: ${(e as any).message}`);
+          console.log(`   ⚠️  Smart element search failed: ${(e as any).message}`);
         }
       }
     } catch (e) {
