@@ -1,4 +1,4 @@
-import { Page, Locator } from '@playwright/test';
+import { Page, Locator, test } from '@playwright/test';
 import { handleHealing, loadCache } from './healer';
 import { resolveLocator } from './resolver';
 import { validateLocator } from './validator';
@@ -32,7 +32,8 @@ async function tryWithCache(
     if (isValid) {
       console.log(`✅ [${actionId}] Cached locator validated, using immediately`);
       // Track cache usage for reporting
-      logCacheHit(selector, cachedSelector, actionId);
+      const testName = test.info().title;
+      logCacheHit(selector, cachedSelector, actionId, testName);
       // Execute action with cached locator (no 30s wait!)
       if (action === 'click') return await cachedLocator.first().click({ timeout: 1000 });
       if (action === 'fill') return await cachedLocator.first().fill(args[0], { timeout: 1000 });

@@ -5,16 +5,20 @@ const jsonFilePath = path.resolve('self-heal-report.json');
 const htmlFilePath = path.resolve('self-heal-report.html');
 
 // Track cache usage for reporting
-const cacheUsageMap = new Map<string, { healed: string; count: number; actions: number[] }>();
+const cacheUsageMap = new Map<string, { healed: string; count: number; actions: number[]; testName: string }>();
 
-export function logCacheHit(originalSelector: string, healedSelector: string, actionId: number) {
+export function logCacheHit(originalSelector: string, healedSelector: string, actionId: number, testName: string = 'Unknown') {
   if (!cacheUsageMap.has(originalSelector)) {
-    cacheUsageMap.set(originalSelector, { healed: healedSelector, count: 0, actions: [] });
+    cacheUsageMap.set(originalSelector, { healed: healedSelector, count: 0, actions: [], testName });
   }
   
   const usage = cacheUsageMap.get(originalSelector)!;
   usage.count++;
   usage.actions.push(actionId);
+  // Update test name if we have it
+  if (testName && testName !== 'Unknown') {
+    usage.testName = testName;
+  }
 }
 
 export function reportCacheUsage() {
@@ -41,6 +45,7 @@ export function reportCacheUsage() {
         strategy: 'cache',
         reuseCount: usage.count,
         usedByActions: usage.actions,
+        test: usage.testName,
         timestamp: new Date().toISOString()
       });
     }
