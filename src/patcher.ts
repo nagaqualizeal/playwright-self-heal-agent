@@ -1,5 +1,7 @@
 import { Page, Locator } from '@playwright/test';
-import { handleHealing } from './healer';
+import { handleHealing, loadCache } from './healer';
+import { resolveLocator } from './resolver';
+import { validateLocator } from './validator';
 
 let actionCounter = 0;
 // Track all registered pages by their context
@@ -7,6 +9,43 @@ const pagesByContext = new Map<any, Page>();
 // Keep track of the most recently patched page as fallback
 let lastPatchedPage: Page | null = null;
 let isLocatorProtoPatched = false;
+
+// ================= CACHE CHECK HELPER =================
+async function tryWithCache(
+  locator: Locator,
+  selector: string,
+  action: string,
+  args: any[],
+  tryOriginal: () => Promise<any>,
+  actionId: number,
+  page: Page
+): Promise<any> {
+  // 🚀 CHECK CACHE FIRST - avoid 30s wait if we have a solution!
+  const cache = loadCache();
+  if (cache[selector]) {
+    console.log(`⚡ [${actionId}] Cache hit for "${selector}" → using healed locator`);
+    const cachedSelector = cache[selector];
+    const cachedLocator = resolveLocator(page, cachedSelector);
+    const isValid = await validateLocator(page, cachedLocator);
+    
+    if (isValid) {
+      console.log(`✅ [${actionId}] Cached locator validated, using immediately`);
+      // Execute action with cached locator (no 30s wait!)
+      if (action === 'click') return await cachedLocator.first().click({ timeout: 1000 });
+      if (action === 'fill') return await cachedLocator.first().fill(args[0], { timeout: 1000 });
+      if (action === 'waitFor') return await cachedLocator.first().waitFor(args[0]);
+      if (action === 'scrollIntoViewIfNeeded') return await cachedLocator.first().scrollIntoViewIfNeeded(args[0]);
+    } else {
+      console.log(`⚠️ [${actionId}] Cached locator invalid, trying original`);
+      // Cache is stale, clear it
+      const cacheObj = loadCache();
+      delete cacheObj[selector];
+    }
+  }
+  
+  // No cache or cache invalid → try original with 30s timeout
+  return await tryOriginal();
+}
 
 // ================= HELPER FUNCTION FOR TEST NAME =================
 function extractTestName(page: Page): string {
@@ -191,9 +230,7 @@ export function patchPage(page: Page) {
       // Get the page from this locator at runtime
       let pageForHealing = getPageForLocator(this as any);
       if (!pageForHealing) {
-        // No page found - this shouldn't happen in normal usage
         console.warn(`[${actionId}] ⚠️ WARNING: Could not determine page for locator`);
-        // Let the error propagate naturally without healing
         return await originalLocatorFill.call(this, value, { timeout: 30000 });
       }
 
@@ -201,8 +238,16 @@ export function patchPage(page: Page) {
       const selector = (this as any)._selector || 'unknown-locator';
 
       try {
-        // Let Playwright wait up to 30 seconds for element to appear
-        return await originalLocatorFill.call(this, value, { timeout: 30000 });
+        // 🚀 TRY WITH CACHE FIRST!
+        return await tryWithCache(
+          this as any,
+          selector,
+          'fill',
+          [value],
+          () => originalLocatorFill.call(this, value, { timeout: 30000 }),
+          actionId,
+          pageForHealing
+        );
 
       } catch (error: any) {
         console.log(`⚠️ [${actionId}] Locator.fill failed after 30s timeout → healing triggered`);
@@ -230,7 +275,6 @@ export function patchPage(page: Page) {
       // Get the page from this locator at runtime
       let pageForHealing = getPageForLocator(this as any);
       if (!pageForHealing) {
-        // No page found - let it fail naturally
         console.warn(`[${actionId}] ⚠️ WARNING: Could not determine page for locator`);
         return await originalLocatorClick.call(this, { timeout: 30000 });
       }
@@ -239,8 +283,16 @@ export function patchPage(page: Page) {
       const selector = (this as any)._selector || 'unknown-locator';
 
       try {
-        // Let Playwright wait up to 30 seconds for element to appear
-        return await originalLocatorClick.call(this, { timeout: 30000 });
+        // 🚀 TRY WITH CACHE FIRST!
+        return await tryWithCache(
+          this as any,
+          selector,
+          'click',
+          [],
+          () => originalLocatorClick.call(this, { timeout: 30000 }),
+          actionId,
+          pageForHealing
+        );
 
       } catch (error: any) {
         console.log(`⚠️ [${actionId}] Locator.click failed after 30s timeout → healing triggered`);
@@ -276,8 +328,16 @@ export function patchPage(page: Page) {
       const selector = (this as any)._selector || 'unknown-locator';
 
       try {
-        // Call waitFor with provided options (state, timeout, etc.)
-        return await originalLocatorWaitFor.call(this, options);
+        // 🚀 TRY WITH CACHE FIRST!
+        return await tryWithCache(
+          this as any,
+          selector,
+          'waitFor',
+          [options],
+          () => originalLocatorWaitFor.call(this, options),
+          actionId,
+          pageForHealing
+        );
 
       } catch (error: any) {
         console.log(`⚠️ [${actionId}] Locator.waitFor failed → healing triggered`);
@@ -313,8 +373,16 @@ export function patchPage(page: Page) {
       const selector = (this as any)._selector || 'unknown-locator';
 
       try {
-        // Call scrollIntoViewIfNeeded with provided options
-        return await originalLocatorScrollIntoViewIfNeeded.call(this, options);
+        // 🚀 TRY WITH CACHE FIRST!
+        return await tryWithCache(
+          this as any,
+          selector,
+          'scrollIntoViewIfNeeded',
+          [options],
+          () => originalLocatorScrollIntoViewIfNeeded.call(this, options),
+          actionId,
+          pageForHealing
+        );
 
       } catch (error: any) {
         console.log(`⚠️ [${actionId}] Locator.scrollIntoViewIfNeeded failed → healing triggered`);

@@ -11,7 +11,7 @@ import { extractLocatorIntent, findTargetElement, extractElementDetails, generat
 const cacheFile = path.resolve('.selfheal-cache.json');
 
 // ================= CACHE HELPERS =================
-function loadCache(): Record<string, string> {
+export function loadCache(): Record<string, string> {
   try {
     if (!fs.existsSync(cacheFile)) return {};
 
