@@ -253,7 +253,7 @@ export async function extractElementDetails(elements: Locator[]) {
 
   return await Promise.all(
     elements.map((el, idx) =>
-      el.evaluate((elem: any) => {
+      el.evaluate((elem: any, index: number) => {
         // Get all relevant attributes
         const attributes = new Map<string, string>();
         for (const attr of elem.attributes || []) {
@@ -261,7 +261,7 @@ export async function extractElementDetails(elements: Locator[]) {
         }
 
         return {
-          index: idx,
+          index: index,
           tag: elem.tagName.toLowerCase(),
           text: (elem.innerText || elem.textContent || '').slice(0, 100),
           html: elem.outerHTML.slice(0, 200),
@@ -289,7 +289,7 @@ export async function extractElementDetails(elements: Locator[]) {
               : null,
           },
         };
-      })
+      }, idx)
     )
   );
 }
