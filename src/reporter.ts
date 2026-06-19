@@ -4,6 +4,52 @@ import path from 'path';
 const jsonFilePath = path.resolve('self-heal-report.json');
 const htmlFilePath = path.resolve('self-heal-report.html');
 
+// Track cache usage for reporting
+const cacheUsageMap = new Map<string, { healed: string; count: number; actions: number[] }>();
+
+export function logCacheHit(originalSelector: string, healedSelector: string, actionId: number) {
+  if (!cacheUsageMap.has(originalSelector)) {
+    cacheUsageMap.set(originalSelector, { healed: healedSelector, count: 0, actions: [] });
+  }
+  
+  const usage = cacheUsageMap.get(originalSelector)!;
+  usage.count++;
+  usage.actions.push(actionId);
+}
+
+export function reportCacheUsage() {
+  if (cacheUsageMap.size === 0) return;
+
+  let data: any[] = [];
+  if (fs.existsSync(jsonFilePath)) {
+    data = JSON.parse(fs.readFileSync(jsonFilePath, 'utf-8'));
+  }
+
+  // Add cache usage entries
+  for (const [original, usage] of cacheUsageMap.entries()) {
+    // Check if this cache hit is already in the report
+    const exists = data.find((d) =>
+      d.original === original &&
+      d.status === 'cache_hit'
+    );
+
+    if (!exists) {
+      data.push({
+        original,
+        healed: usage.healed,
+        status: 'cache_hit',
+        strategy: 'cache',
+        reuseCount: usage.count,
+        usedByActions: usage.actions,
+        timestamp: new Date().toISOString()
+      });
+    }
+  }
+
+  fs.writeFileSync(jsonFilePath, JSON.stringify(data, null, 2));
+  generateHtmlReport(data);
+}
+
 export function logHealing(entry: any) {
   let data: any[] = [];
 
@@ -81,6 +127,13 @@ function generateHtmlReport(data: any[]) {
           <div class="info-row">
             <span class="info-label">Strategy:</span>
             <span class="info-value">${entry.strategy}</span>
+          </div>
+          ` : ''}
+
+          ${entry.reuseCount ? `
+          <div class="info-row">
+            <span class="info-label">⚡ Reused:</span>
+            <span class="info-value">${entry.reuseCount} time(s) by actions [${entry.usedByActions?.join(', ')}]</span>
           </div>
           ` : ''}
 
@@ -298,6 +351,7 @@ function generateHtmlReport(data: any[]) {
     }
     .status-badge.success { background: #28a745; }
     .status-badge.failed { background: #dc3545; }
+    .status-badge.cache_hit { background: #17a2b8; }
     
     .info-row {
       margin: 10px 0;

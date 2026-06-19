@@ -180,21 +180,11 @@ export async function handleHealing(
       ariaSnapshot = await page.locator('body').ariaSnapshot();
       console.log(`   📋 Aria snapshot captured (${ariaSnapshot.length} chars)`);
       
-      // ✅ NEW: Show aria snapshot content for debugging
-      console.log(`\n   📊 === ARIA SNAPSHOT FULL CONTENT ===`);
-      console.log(ariaSnapshot);
-      console.log(`   === END ARIA SNAPSHOT ===\n`);
+      // ✅ REMOVED: Aria snapshot is captured but not printed (too verbose)
+      // The analysis happens silently in the background
       
-      // ✅ NEW: Search for buttons in aria-snapshot
+      // ✅ Search for buttons silently (not printed)
       const buttonMatches = ariaSnapshot.match(/button[^:]*:\s*"[^"]*"/gi) || [];
-      if (buttonMatches.length > 0) {
-        console.log(`\n   🔍 Found ${buttonMatches.length} button(s) in aria-snapshot:`);
-        buttonMatches.forEach((match, i) => {
-          console.log(`      [${i + 1}] ${match}`);
-        });
-      } else {
-        console.log(`\n   ⚠️  No buttons found in aria-snapshot!`);
-      }
       
       // ✅ NEW: Search for specific text in snapshot
       if (originalSelector.includes('Change') || originalSelector.includes('Password')) {

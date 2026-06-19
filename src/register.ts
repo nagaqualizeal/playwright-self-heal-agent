@@ -1,5 +1,6 @@
 import { test as base } from '@playwright/test';
 import { patchPage } from './patcher';
+import { reportCacheUsage } from './reporter';
 
 // ✅ Export patchPage for manual registration (one-time call)
 export { patchPage as register };
@@ -15,4 +16,9 @@ export const test = base.extend({
     patchPage(page);
     await use(page);
   },
+});
+
+// 📊 Report cache usage after all tests
+base.afterAll(() => {
+  reportCacheUsage();
 });
