@@ -21,6 +21,7 @@ export function logHealing(entry: any) {
 
   if (exists) {
     console.log('⚠️ Duplicate healing skipped');
+    console.log(`📄 Report available at: ${htmlFilePath}`);
     return;
   }
 
@@ -37,6 +38,7 @@ export function logHealing(entry: any) {
   generateHtmlReport(data);
 
   console.log(`📝 Healing logged (${entry.status})`);
+  console.log(`📄 Report available at: ${htmlFilePath}`);
 }
 
 function generateHtmlReport(data: any[]) {
