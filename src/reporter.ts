@@ -467,9 +467,11 @@ function generateHtmlReport(data: any[]) {
     
     tr.success { background: #f0fdf4; }
     tr.failed { background: #fdf8f7; }
+    tr.cache_hit { background: #f0f8ff; }
     
     tr.success:hover { background: #dcfce7; }
     tr.failed:hover { background: #fee2e2; }
+    tr.cache_hit:hover { background: #e0f2ff; }
     
     .duplicates-table {
       background: #fff3cd;
@@ -576,6 +578,18 @@ function generateHtmlReport(data: any[]) {
           </tr>
           `;
           }).join('')}
+          ${data.filter(d => d.status === 'cache_hit').map((entry, idx) => `
+          <tr class="cache_hit">
+            <td>${healingAttempts.length + idx + 1}</td>
+            <td>${entry.test || 'Unknown'}</td>
+            <td><code style="font-size: 10px;">${escapeHtml(entry.original)}</code></td>
+            <td><code style="font-size: 10px;">${entry.healed ? escapeHtml(entry.healed) : '-'}</code></td>
+            <td>⚡ Cache Hit</td>
+            <td>CACHE</td>
+            <td>-</td>
+            <td>Reused ${entry.reuseCount} times</td>
+          </tr>
+          `).join('')}
         </tbody>
       </table>
     </div>

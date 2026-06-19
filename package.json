@@ -1,6 +1,6 @@
 {
   "name": "playwright-self-heal-agent",
-  "version": "3.0.5",
+  "version": "3.0.6",
   "main": "dist/register.js",
   "types": "dist/register.d.ts",
   "scripts": {
