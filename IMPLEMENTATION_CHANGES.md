@@ -1,5 +1,72 @@
 # Self-Heal Agent - Updated Implementation Summary
 
+---
+
+# Version 3.0.1 - Cache-First Performance Optimization
+
+## ⚡ **The Problem You Had:**
+
+```
+Test code:
+await folder.waitFor({ state: "visible" });      // Try 30s → Heal → Cache ✅
+await folder.scrollIntoViewIfNeeded();            // Try 30s → Heal again? 😱
+await folder.click();                             // Try 30s → Heal again? 😱
+
+TOTAL WASTED TIME: 90 seconds (30 + 30 + 30)
+```
+
+**Root cause:** Each action independently tried the original broken selector for 30 seconds before checking the cache.
+
+## ✅ **The Solution: Cache-First Strategy**
+
+```typescript
+// In patcher.ts - new tryWithCache() helper
+async function tryWithCache(locator, selector, action, ...) {
+  // 🚀 CHECK CACHE FIRST (instant!)
+  const cache = loadCache();
+  if (cache[selector]) {
+    const healed = resolveLocator(page, cache[selector]);
+    if (isValid) {
+      return await executeAction(healed);  // ← INSTANT SUCCESS!
+    }
+  }
+  
+  // Only try original if NOT in cache
+  return await tryOriginal();  // ← 30s timeout
+}
+```
+
+## **New Flow:**
+
+```
+Step 1: waitFor()
+  ↓
+  Cache MISS → Try original 30s → ❌ FAIL → Heal → Cache ✅
+  ↓
+Step 2: scroll()
+  ↓
+  Cache HIT → Use healed selector immediately (instant!) ✅
+  ↓
+Step 3: click()
+  ↓
+  Cache HIT → Use healed selector immediately (instant!) ✅
+
+TOTAL TIME: ~30 seconds (was 90!) 🚀
+```
+
+## **Applied To All Methods:**
+
+- ✅ `locator.click()`
+- ✅ `locator.fill()`
+- ✅ `locator.waitFor()` ← NEW in v3.0
+- ✅ `locator.scrollIntoViewIfNeeded()` ← NEW in v3.0
+
+## **Zero Code Changes Needed!**
+
+Your tests stay exactly the same. This optimization happens entirely at the framework level.
+
+---
+
 ## 📋 Files Changed
 
 ### **1. NEW: src/locatorParser.ts** (430 lines)
