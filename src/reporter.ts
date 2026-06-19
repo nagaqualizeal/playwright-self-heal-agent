@@ -88,7 +88,13 @@ export function logHealing(entry: any) {
 }
 
 function generateHtmlReport(data: any[]) {
-  const entriesHtml = data.map((entry, idx) => {
+  // Filter to only count actual healing attempts (not cache reuses)
+  const healingAttempts = data.filter(d => d.status !== 'cache_hit');
+  const successCount = healingAttempts.filter(d => d.status === 'success').length;
+  const failedCount = healingAttempts.filter(d => d.status === 'failed').length;
+  const cacheHitCount = data.filter(d => d.status === 'cache_hit').length;
+  const totalReuses = data.filter(d => d.status === 'cache_hit').reduce((sum, d) => sum + (d.reuseCount || 0), 0);
+  const entriesHtml = healingAttempts.map((entry, idx) => {
     return `
         <div class="healing-entry ${entry.status}">
           <div class="header">
@@ -307,6 +313,7 @@ function generateHtmlReport(data: any[]) {
     .stat-value { font-size: 28px; font-weight: bold; }
     .stat-value.success { color: #28a745; }
     .stat-value.failed { color: #dc3545; }
+    .stat-value.info { color: #17a2b8; }
     
     .healing-entry {
       background: white;
@@ -318,6 +325,7 @@ function generateHtmlReport(data: any[]) {
     }
     .healing-entry.success { border-left-color: #28a745; }
     .healing-entry.failed { border-left-color: #dc3545; }
+    .healing-entry.cache_hit { border-left-color: #17a2b8; }
     
     .header {
       display: flex;
@@ -503,20 +511,24 @@ function generateHtmlReport(data: any[]) {
     
     <div class="stats">
       <div class="stat-card">
-        <div class="stat-label">Total Attempts</div>
-        <div class="stat-value">${data.length}</div>
+        <div class="stat-label">🔧 Healing Attempts</div>
+        <div class="stat-value">${healingAttempts.length}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">✅ Success</div>
-        <div class="stat-value success">${data.filter(d => d.status === 'success').length}</div>
+        <div class="stat-value success">${successCount}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">❌ Failed</div>
-        <div class="stat-value failed">${data.filter(d => d.status === 'failed').length}</div>
+        <div class="stat-value failed">${failedCount}</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">⚡ Cache Reuses</div>
+        <div class="stat-value info">${totalReuses}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Success Rate</div>
-        <div class="stat-value">${data.length > 0 ? Math.round((data.filter(d => d.status === 'success').length / data.length) * 100) : 0}%</div>
+        <div class="stat-value">${healingAttempts.length > 0 ? Math.round((successCount / healingAttempts.length) * 100) : 0}%</div>
       </div>
     </div>
 
@@ -536,7 +548,7 @@ function generateHtmlReport(data: any[]) {
           </tr>
         </thead>
         <tbody>
-          ${data.map((entry, idx) => {
+          ${healingAttempts.map((entry, idx) => {
             // Calculate failure reason
             let failureReason = '-';
             if (entry.status === 'failed') {
@@ -569,9 +581,53 @@ function generateHtmlReport(data: any[]) {
     </div>
 
     <div style="margin-bottom: 30px;">
-      <h3>📖 Detailed Entries</h3>
+      <h3>📖 Detailed Healing Attempts</h3>
       ${entriesHtml}
     </div>
+
+    ${cacheHitCount > 0 ? `
+    <div style="margin-bottom: 30px;">
+      <h3>⚡ Cache Reuses (${cacheHitCount})</h3>
+      ${data.filter(d => d.status === 'cache_hit').map((entry, idx) => `
+        <div class="healing-entry cache_hit">
+          <div class="header">
+            <div>
+              <div class="test-name">
+                #${idx + 1} ${entry.test || 'Unknown Test'}
+              </div>
+            </div>
+            <div>
+              <span class="status-badge cache_hit">⚡ CACHE_HIT</span>
+            </div>
+          </div>
+
+          <div class="info-row">
+            <span class="info-label">Original:</span>
+            <span class="info-value"><code>${escapeHtml(entry.original)}</code></span>
+          </div>
+
+          <div class="info-row">
+            <span class="info-label">Healed:</span>
+            <span class="info-value"><code>${escapeHtml(entry.healed)}</code></span>
+          </div>
+
+          <div class="info-row">
+            <span class="info-label">Strategy:</span>
+            <span class="info-value">${entry.strategy}</span>
+          </div>
+
+          <div class="info-row">
+            <span class="info-label">⚡ Reused:</span>
+            <span class="info-value">${entry.reuseCount} time(s) by actions [${entry.usedByActions?.join(', ')}]</span>
+          </div>
+
+          <div class="info-row" style="font-size: 12px; color: #666;">
+            🕐 ${new Date(entry.timestamp).toLocaleString()}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    ` : ''}
   </div>
 
   <script>
