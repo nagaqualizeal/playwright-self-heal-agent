@@ -1,17 +1,38 @@
 import { Page } from '@playwright/test';
 
+// Matches either a quoted string ('text'/"text") or a regex literal (/pattern/flags),
+// since Playwright's getBy* "name"/text arguments accept both, and the LLM often
+// suggests a regex (e.g. { name: /forgot password/i }) for a case-insensitive/fuzzy match.
+const STRING_OR_REGEX = `(\\/(?:\\\\.|[^\\/\\\\])+\\/[a-z]*|'[^']*'|"[^"]*")`;
+
+// Parses a raw matched argument (still containing its quotes/slashes) into a
+// real string or RegExp so it behaves the same as the literal would in source code.
+function parseStringOrRegex(raw: string): string | RegExp {
+  const regexLiteral = raw.match(/^\/((?:\\.|[^/\\])+)\/([a-z]*)$/i);
+  if (regexLiteral) {
+    try {
+      return new RegExp(regexLiteral[1], regexLiteral[2]);
+    } catch {
+      // Fall through to treat it as a plain string if the regex is malformed
+    }
+  }
+
+  const quoted = raw.match(/^['"]([^'"]*)['"]$/);
+  return quoted ? quoted[1] : raw;
+}
+
 export function resolveLocator(page: Page, locatorStr: string) {
   // ==================== PLAYWRIGHT QUERY METHODS ====================
-  
-  // getByRole('button', { name: 'Login' })
+
+  // getByRole('button', { name: 'Login' }) or getByRole('link', { name: /forgot password/i })
   if (locatorStr.includes('getByRole')) {
     const roleMatch = locatorStr.match(/getByRole\(\s*['"]([^'"]+)['"]/);
-    const nameMatch = locatorStr.match(/name:\s*['"]([^'"]+)['"]/);
-    
+    const nameMatch = locatorStr.match(new RegExp(`name:\\s*${STRING_OR_REGEX}`, 'i'));
+
     if (roleMatch) {
       const role = roleMatch[1];
-      const name = nameMatch ? nameMatch[1] : '';
-      
+      const name = nameMatch ? parseStringOrRegex(nameMatch[1]) : '';
+
       if (name) {
         return (page.getByRole as any)(role, { name });
       } else {
@@ -19,28 +40,28 @@ export function resolveLocator(page: Page, locatorStr: string) {
       }
     }
   }
-  
-  // getByText('Search')
+
+  // getByText('Search') or getByText(/search/i)
   if (locatorStr.includes('getByText')) {
-    const textMatch = locatorStr.match(/getByText\(\s*['"]([^'"]+)['"]/);
+    const textMatch = locatorStr.match(new RegExp(`getByText\\(\\s*${STRING_OR_REGEX}`));
     if (textMatch) {
-      return page.getByText(textMatch[1]);
+      return page.getByText(parseStringOrRegex(textMatch[1]));
     }
   }
-  
-  // getByPlaceholder('Username')
+
+  // getByPlaceholder('Username') or getByPlaceholder(/username/i)
   if (locatorStr.includes('getByPlaceholder')) {
-    const placeholderMatch = locatorStr.match(/getByPlaceholder\(\s*['"]([^'"]+)['"]/);
+    const placeholderMatch = locatorStr.match(new RegExp(`getByPlaceholder\\(\\s*${STRING_OR_REGEX}`));
     if (placeholderMatch) {
-      return page.getByPlaceholder(placeholderMatch[1]);
+      return page.getByPlaceholder(parseStringOrRegex(placeholderMatch[1]));
     }
   }
-  
-  // getByLabel('Email')
+
+  // getByLabel('Email') or getByLabel(/email/i)
   if (locatorStr.includes('getByLabel')) {
-    const labelMatch = locatorStr.match(/getByLabel\(\s*['"]([^'"]+)['"]/);
+    const labelMatch = locatorStr.match(new RegExp(`getByLabel\\(\\s*${STRING_OR_REGEX}`));
     if (labelMatch) {
-      return page.getByLabel(labelMatch[1]);
+      return page.getByLabel(parseStringOrRegex(labelMatch[1]));
     }
   }
   
