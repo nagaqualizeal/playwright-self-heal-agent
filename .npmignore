@@ -37,6 +37,9 @@ examples/
 yarn.lock
 package-lock.json
 
+# Packed tarballs (never bundle a release inside another release)
+*.tgz
+
 # Misc
 .turbo/
 .turboignore
