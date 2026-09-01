@@ -120,6 +120,13 @@ function generateHtmlReport(data: any[]) {
             <span class="info-value"><code>${escapeHtml(entry.original)}</code></span>
           </div>
 
+          ${entry.elementDescription ? `
+          <div class="info-row">
+            <span class="info-label">📝 Developer Description:</span>
+            <span class="info-value">${escapeHtml(entry.elementDescription)}</span>
+          </div>
+          ` : ''}
+
           ${entry.healed ? `
           <div class="info-row">
             <span class="info-label">Healed:</span>

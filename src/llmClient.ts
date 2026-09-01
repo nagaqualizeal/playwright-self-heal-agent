@@ -182,7 +182,14 @@ You are a Playwright locator expert. Your task is identify the CORRECT locator f
 
 === ORIGINAL FAILED LOCATOR (INCORRECT) ===
 ${payload.failedLocator}
-
+${payload.elementDescription ? `
+=== DEVELOPER-PROVIDED ELEMENT DESCRIPTION (HIGH-CONFIDENCE GROUND TRUTH) ===
+The developer explicitly labeled this element as: "${payload.elementDescription}"
+This is a direct statement of intent from the person who wrote the test - treat it as
+more reliable than any inferred/heuristic signal below. Prioritize suggestions whose
+role, label, text, or nearby context in the accessibility tree matches this description
+over suggestions that only match on incidental attributes.
+` : ''}
 === SEMANTIC INTENT ===
 ${semanticIntent || 'Determine the element type from context'}
 

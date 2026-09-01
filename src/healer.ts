@@ -7,6 +7,7 @@ import { resolveLocator } from './resolver';
 import { validateLocator, ValidationMode } from './validator';
 import { logHealing } from './reporter';
 import { extractLocatorIntent, findTargetElement, extractElementDetails, generateSelectorSuggestions } from './locatorParser';
+import { extractElementDescription } from './selectorUtils';
 
 const cacheFile = path.resolve('.selfheal-cache.json');
 
@@ -86,6 +87,11 @@ export async function handleHealing(
 
     console.log(`⚠️ [${actionId}] Healing triggered for: ${originalSelector}`);
     console.log(`   ❌ Reason: ${scriptFailureReason}`);
+
+    const elementDescription = extractElementDescription(originalSelector);
+    if (elementDescription) {
+      console.log(`   📝 Developer description: "${elementDescription}"`);
+    }
 
     const attempts: any[] = [];
 
@@ -336,7 +342,8 @@ export async function handleHealing(
       failedElementSnapshot,
       contextHtml,
       elementCount,
-      elementDetails
+      elementDetails,
+      elementDescription
     };
     
     console.log(`\n   📤 === PAYLOAD SENT TO LLM ===`);
@@ -357,7 +364,8 @@ export async function handleHealing(
       failedElementSnapshot,
       contextHtml,
       elementCount,
-      elementDetails
+      elementDetails,
+      elementDescription
     });
 
     console.log(`   🧠 LLM returned ${suggestions.length} suggestion(s)`);
@@ -463,6 +471,7 @@ export async function handleHealing(
             confidence: suggestion.confidence,
             reasoning: suggestion.reasoning,
             elementDetails,
+            elementDescription,
             scriptFailureReason,
             failedLocatorElements,
             allLlmSuggestions: suggestions
@@ -568,6 +577,7 @@ export async function handleHealing(
             confidence: suggestion.confidence,
             reasoning: suggestion.reasoning,
             elementDetails,
+            elementDescription,
             scriptFailureReason,
             failedLocatorElements,
             allLlmSuggestions: suggestions
@@ -614,6 +624,7 @@ export async function handleHealing(
     test: testName,
     action,
     confidence: 0,
+    elementDescription,
     scriptFailureReason,
     failedLocatorElements
   });
