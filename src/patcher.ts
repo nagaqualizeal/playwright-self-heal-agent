@@ -60,15 +60,16 @@ function extractTestName(page: Page): string {
   if (testInfo) {
     const title = testInfo.title || '';
     const file = testInfo.file || testInfo.fileName || '';
-    const suite = testInfo.suite || '';
-    
+
     if (title || file) {
       // Extract just the filename from full path
       const fileName = file ? file.split(/[/\\]/).pop() : '';
+      // A single clean label: [file] title - no suite/titlePath breadcrumb,
+      // since that (built from testInfo.titlePath) always ends with the test's
+      // own title and duplicates what's already shown here.
       const parts = [];
       if (fileName) parts.push(`[${fileName}]`);
       if (title) parts.push(title);
-      if (suite && suite !== title) parts.push(`(${suite})`);
       return parts.length > 0 ? parts.join(' ') : 'unknown-test';
     }
   }
