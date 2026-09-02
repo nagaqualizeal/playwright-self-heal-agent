@@ -1,5 +1,5 @@
 import { Page, Locator, FrameLocator, BrowserContext } from '@playwright/test';
-import { heal } from './heal';
+import { heal, tryHealFromCache } from './heal';
 import { captureCallSite, SourceLocation } from './sourceLocation';
 
 const ACTION_METHODS = new Set([
@@ -47,6 +47,17 @@ export function wrapLocator(raw: Locator, ctx: Ctx): Locator {
 
       if (ACTION_METHODS.has(prop)) {
         return async (...args: any[]) => {
+          const cacheProbe = await tryHealFromCache({
+            page: ctx.page,
+            target: ctx.target,
+            originalLocator: target,
+            method: prop,
+            args,
+            sourceLocation: ctx.sourceLocation,
+            testName: ctx.getTestName(),
+          });
+          if (cacheProbe.ok) return cacheProbe.result;
+
           try {
             return await (target as any)[prop](...args);
           } catch (error) {
@@ -173,19 +184,33 @@ export function wrapPage(raw: Page): Page {
       if (PAGE_STRING_ACTION_METHODS.has(prop)) {
         return async (...args: any[]) => {
           const [selector, ...rest] = args;
+          const sourceLocation = captureCallSite();
+          const originalLocator = target.locator(selector);
+          const method = mapPageMethodToLocatorMethod(prop);
+
+          const cacheProbe = await tryHealFromCache({
+            page: proxy,
+            target: proxy,
+            originalLocator,
+            method,
+            args: rest,
+            sourceLocation,
+            testName: getTestName(),
+          });
+          if (cacheProbe.ok) return cacheProbe.result;
+
           try {
             return await (target as any)[prop](selector, ...rest);
           } catch (error) {
-            const originalLocator = target.locator(selector);
             return heal({
               page: proxy,
               target: proxy,
               originalLocator,
-              method: mapPageMethodToLocatorMethod(prop),
+              method,
               args: rest,
               error,
               actionOptions: extractActionOptions(rest),
-              sourceLocation: captureCallSite(),
+              sourceLocation,
               testName: getTestName(),
             });
           }

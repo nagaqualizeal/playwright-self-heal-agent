@@ -9,19 +9,31 @@ import { logHeal, HealAttempt } from './report';
 import { getActiveProvider } from '../providers';
 import { SourceLocation, formatSourceLocation } from './sourceLocation';
 
-export type HealRequest = {
+export type CacheProbeRequest = {
   page: Page;
   target: Page | FrameLocator;
   originalLocator: Locator;
   method: string;
   args: any[];
-  error: any;
-  actionOptions?: { state?: string };
   sourceLocation: SourceLocation | null;
   testName: string;
 };
 
+export type HealRequest = CacheProbeRequest & {
+  error: any;
+  actionOptions?: { state?: string };
+};
+
 const SHORT_TIMEOUT = 2000;
+
+function describeFailure(locator: Locator, location: SourceLocation | null) {
+  const originalSelectorText = (locator as any)._selector || '';
+  const describedLabel = extractDescribedLabel(originalSelectorText);
+  const inferredLabel = !describedLabel && location
+    ? inferDescriptionFromVariableName(extractVariableNameFromSourceLine(location.file, location.line))
+    : null;
+  return { originalSelectorText, description: describedLabel || inferredLabel };
+}
 
 async function executeAction(locator: Locator, method: string, args: any[]): Promise<any> {
   const fn = (locator as any)[method];
@@ -65,48 +77,52 @@ function scriptFailureReason(error: any): string {
   return message.split('\n')[0] || 'Element not found.';
 }
 
+// Checked BEFORE an action is even attempted (not just after it fails), so a
+// cache hit skips the original action's full timeout wait entirely rather
+// than only skipping the AI call once that wait has already elapsed.
+export async function tryHealFromCache(req: CacheProbeRequest): Promise<{ ok: true; result: any } | { ok: false }> {
+  const location = req.sourceLocation;
+  const { originalSelectorText, description } = describeFailure(req.originalLocator, location);
+
+  const cached = getCachedHeal(originalSelectorText, location);
+  if (!cached) return { ok: false };
+
+  const candidate = resolveLocator(req.target, cached);
+  const result = await validateLocator(candidate, ValidationMode.RELAXED, description);
+
+  if (result.valid && result.resolvedLocator) {
+    logHeal({
+      original: originalSelectorText,
+      healed: cached,
+      status: 'cache_hit',
+      strategy: 'cache',
+      action: req.method,
+      test: req.testName,
+      pageUrl: req.page.url(),
+      location: formatSourceLocation(location),
+      sourceFile: location?.file,
+      sourceLine: location?.line,
+      description,
+    });
+    return { ok: true, result: await executeAction(result.resolvedLocator, req.method, req.args) };
+  }
+
+  invalidateCachedHeal(originalSelectorText, location);
+  return { ok: false };
+}
+
 export async function heal(req: HealRequest): Promise<any> {
   const classification = classifyFailure(req.error, req.method, req.actionOptions);
   if (classification !== 'heal') {
     throw req.error;
   }
 
-  const originalSelectorText = (req.originalLocator as any)._selector || '';
   const location = req.sourceLocation;
   const locationLabel = formatSourceLocation(location);
-
-  const describedLabel = extractDescribedLabel(originalSelectorText);
-  const inferredLabel = !describedLabel && location
-    ? inferDescriptionFromVariableName(extractVariableNameFromSourceLine(location.file, location.line))
-    : null;
-  const description = describedLabel || inferredLabel;
+  const { originalSelectorText, description } = describeFailure(req.originalLocator, location);
 
   const attempts: HealAttempt[] = [];
   const pageUrl = req.page.url();
-
-  // ---- Cache ----
-  const cached = getCachedHeal(originalSelectorText, location);
-  if (cached) {
-    const candidate = resolveLocator(req.target, cached);
-    const result = await validateLocator(candidate, ValidationMode.RELAXED, description);
-    if (result.valid && result.resolvedLocator) {
-      logHeal({
-        original: originalSelectorText,
-        healed: cached,
-        status: 'cache_hit',
-        strategy: 'cache',
-        action: req.method,
-        test: req.testName,
-        pageUrl,
-        location: locationLabel,
-        sourceFile: location?.file,
-        sourceLine: location?.line,
-        description,
-      });
-      return executeAction(result.resolvedLocator, req.method, req.args);
-    }
-    invalidateCachedHeal(originalSelectorText, location);
-  }
 
   const provider = getActiveProvider();
   if (!provider) {
