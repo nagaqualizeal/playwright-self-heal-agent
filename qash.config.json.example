@@ -1,0 +1,6 @@
+{
+  "testDir": "tests",
+  "reportJsonPath": "qash-heal-report.json",
+  "reportHtmlPath": "qash-heal-report.html",
+  "cachePath": ".qash-cache.json"
+}

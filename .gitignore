@@ -34,3 +34,11 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+# QASH runtime artifacts (generated when this repo's own examples/tests run)
+qash-heal-report.json
+qash-heal-report.html
+.qash-cache.json
+.qash-cache.json.run-lock
+qash.config.json
+*.tgz
