@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { loadConfig } from './config';
+import { attachToNativeReport } from './nativeReport';
 
 export type HealAttempt = {
   strategy: string;
@@ -78,7 +79,7 @@ function readEntries(): HealEntry[] {
   }
 }
 
-export function logHeal(entry: HealEntry) {
+export async function logHeal(entry: HealEntry): Promise<void> {
   const { reportJsonPath } = loadConfig();
   const data = readEntries();
 
@@ -92,9 +93,11 @@ export function logHeal(entry: HealEntry) {
   );
   if (isDuplicate) return;
 
-  data.push({ ...entry, timestamp: new Date().toISOString() });
+  const newEntry = { ...entry, timestamp: new Date().toISOString() };
+  data.push(newEntry);
   fs.writeFileSync(reportJsonPath, JSON.stringify(data, null, 2));
   generateHtmlReport(data);
+  await attachToNativeReport(newEntry);
 }
 
 function escapeHtml(str: string): string {

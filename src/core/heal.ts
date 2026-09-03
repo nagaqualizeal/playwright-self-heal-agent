@@ -91,7 +91,7 @@ export async function tryHealFromCache(req: CacheProbeRequest): Promise<{ ok: tr
   const result = await validateLocator(candidate, ValidationMode.RELAXED, description);
 
   if (result.valid && result.resolvedLocator) {
-    logHeal({
+    await logHeal({
       original: originalSelectorText,
       healed: cached,
       status: 'cache_hit',
@@ -126,7 +126,7 @@ export async function heal(req: HealRequest): Promise<any> {
 
   const provider = getActiveProvider();
   if (!provider) {
-    logHeal({
+    await logHeal({
       original: originalSelectorText,
       status: 'failed',
       strategy: 'none',
@@ -180,7 +180,7 @@ export async function heal(req: HealRequest): Promise<any> {
 
       if (result.valid && result.resolvedLocator) {
         saveHeal(originalSelectorText, location, suggestion.locator);
-        logHeal({
+        await logHeal({
           original: originalSelectorText,
           healed: suggestion.locator,
           status: 'success',
@@ -218,7 +218,7 @@ export async function heal(req: HealRequest): Promise<any> {
 
       if (result.valid && result.resolvedLocator) {
         saveHeal(originalSelectorText, location, suggestion.locator);
-        logHeal({
+        await logHeal({
           original: originalSelectorText,
           healed: suggestion.locator,
           status: 'success',
@@ -241,7 +241,7 @@ export async function heal(req: HealRequest): Promise<any> {
     }
   }
 
-  logHeal({
+  await logHeal({
     original: originalSelectorText,
     status: 'failed',
     strategy: 'llm',

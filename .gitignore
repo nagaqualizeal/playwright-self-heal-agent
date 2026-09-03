@@ -42,3 +42,5 @@ qash-heal-report.html
 .qash-cache.json.run-lock
 qash.config.json
 *.tgz
+playwright-report/
+playwright-default-report.html
