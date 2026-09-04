@@ -123,6 +123,14 @@ records the test name, the **page URL** the failure happened on, the source
 `file:line` the locator was declared at, the original and healed locator, and
 — on failure — why every candidate was rejected.
 
+The same information is also mirrored into **Playwright's own HTML report**
+(`playwright-report/index.html`, or whatever `reporter` your project
+configures): every heal, cache hit, or heal failure shows up as an annotation
+on its test (`qash-healed`, `qash-cache-hit`, `qash-heal-failed`), with the
+full entry attached as downloadable JSON. Click into an individual test to see
+it — the report's landing page itself still just shows pass/fail, same as
+without QASH.
+
 ## Caching
 
 A successful heal is cached by **selector + declaration site**, not by
@@ -179,6 +187,29 @@ writes its report/cache:
   "cachePath": ".qash-cache.json"
 }
 ```
+
+## Trying it in an existing project
+
+To evaluate QASH against a real test suite rather than a fresh install:
+
+1. Build and pack it from source: `npm run build && npm pack` (produces
+   `qash-playwright-<version>.tgz`).
+2. In your test project: `npm install /path/to/qash-playwright-<version>.tgz`.
+3. Copy `.env.example` to `.env` in your project root and configure one provider.
+4. Change your test files' import from `@playwright/test` to `qash-playwright`
+   (or from whatever custom fixture you were using before). If you had a
+   fixture whose only job was registering a self-healer on new pages/tabs, it
+   can be deleted — QASH covers that automatically.
+5. Make sure `use.actionTimeout` is set in `playwright.config.ts` (see above).
+6. Run `npx qash-playwright checkup` to confirm the provider is reachable and
+   see any locator-hygiene warnings before running anything.
+7. Run your suite as normal (`npx playwright test`). Check `qash-heal-report.html`
+   for the aggregate view, or your usual Playwright report for the per-test
+   annotations.
+
+Since this evaluates real, possibly-sensitive test flows, start with a
+disposable/throwaway branch and a provider you're comfortable sending page
+content to.
 
 ## Not in this version
 
