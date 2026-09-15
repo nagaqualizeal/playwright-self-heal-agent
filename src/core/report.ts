@@ -1,6 +1,7 @@
 import fs from 'fs';
 import { loadConfig } from './config';
 import { attachToNativeReport } from './nativeReport';
+import { resetCache } from './cache';
 
 export type HealAttempt = {
   strategy: string;
@@ -41,11 +42,18 @@ let checkedThisWorker = false;
 // "already reset" flag can't be shared between them. All workers spawned by
 // one `npx playwright test` invocation share the same parent process id,
 // though, so that id doubles as a cheap run identifier: the first worker to
-// notice it doesn't match the last recorded run clears the report for
-// everyone. A harmless double-reset race at the very start of a run (two
-// workers starting near-simultaneously) is the only downside, and it's a
-// no-op difference from a single reset.
-export function ensureReportResetForThisRun() {
+// notice it doesn't match the last recorded run clears the report (and the
+// cache — see below) for everyone. A harmless double-reset race at the very
+// start of a run (two workers starting near-simultaneously) is the only
+// downside, and it's a no-op difference from a single reset.
+//
+// The cache is deliberately wiped here too, on every new run (single test or
+// full suite alike) — not just once per calendar day or left to grow forever.
+// Within one run, tests 2, 3, ... can still reuse a heal test 1 already found
+// (nothing here clears it mid-run), but the next separate invocation starts
+// from a clean slate, so "did this actually heal just now" is never masked
+// by a stale hit from an earlier run.
+export function ensureFreshRunState() {
   if (checkedThisWorker) return;
   checkedThisWorker = true;
 
@@ -60,6 +68,7 @@ export function ensureReportResetForThisRun() {
 
   if (previousRunId !== currentRunId) {
     resetReport();
+    resetCache();
     try {
       fs.writeFileSync(lockPath, currentRunId);
     } catch {

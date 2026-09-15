@@ -40,3 +40,7 @@ export function invalidateCachedHeal(selector: string, location: SourceLocation 
   delete cache[cacheKey(selector, location)];
   fs.writeFileSync(cachePath, JSON.stringify(cache, null, 2));
 }
+
+export function resetCache() {
+  fs.writeFileSync(loadConfig().cachePath, '{}');
+}
