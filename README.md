@@ -8,13 +8,25 @@ pay for another AI call again within that run.
 
 ## Install
 
+QASH isn't published to the public npm registry yet, so for now it's installed
+from a local build rather than a plain `npm install qash-playwright`:
+
 ```sh
-npm install qash-playwright
+# Build and pack it from source (in this repo):
+npm run build && npm pack
+# → produces qash-playwright-<version>.tgz
+
+# In your test project:
+npm install /path/to/qash-playwright-<version>.tgz
 ```
+
+This adds it to your project's `package.json`/`package-lock.json` like any
+other dependency — nothing further to wire up for the install itself.
 
 ## Configure a provider
 
-Copy `.env.example` to `.env` and fill in one provider:
+If your project already has an `.env` file, just add these to it; otherwise
+copy `.env.example` to `.env` in your project root:
 
 ```sh
 HEALER_ENABLED=true
@@ -31,13 +43,14 @@ See `.env.example` for the other providers' variables.
 Playwright lets a broken locator retry silently for your entire test `timeout`
 before it ever throws — which means QASH never gets a turn, since it only
 activates once an action actually fails. Set `actionTimeout` well below your
-test `timeout`:
+test `timeout` (add it if it isn't already set — QASH just reads whatever
+value is there):
 
 ```ts
 export default defineConfig({
-  timeout: 30_000,
+  timeout: 30000,
   use: {
-    actionTimeout: 10_000,
+    actionTimeout: 10000,
   },
 });
 ```
@@ -69,7 +82,9 @@ test('logs in', async ({ page }) => {
 ```
 
 New tabs, popups, and elements inside `<iframe>`s are healing-aware automatically
-— no extra fixture or wrapping needed for any of them.
+— no extra fixture or wrapping needed for any of them. If you had a custom
+fixture whose only job was registering a self-healer on new pages/tabs, it can
+be deleted once you've migrated off it.
 
 Not using the `@playwright/test` fixtures? Wrap a page manually:
 
@@ -115,6 +130,60 @@ the action fails:
   )` (or the default `'attached'`), the common "wait for it, then interact"
   pattern, is healed like any other action.
 
+## Config file
+
+`qash.config.json` (optional) can override where QASH reads tests from and
+writes its report/cache:
+
+```json
+{
+  "testDir": "tests",
+  "reportJsonPath": "qash-heal-report.json",
+  "reportHtmlPath": "qash-heal-report.html",
+  "cachePath": ".qash-cache.json"
+}
+```
+
+## `qash-playwright checkup`
+
+Validates your setup before you rely on it:
+
+```sh
+npx qash-playwright checkup
+```
+
+Checks provider connectivity (a real call, within your actual configured
+timeout), whether `actionTimeout` is set and has real headroom below your test
+`timeout`, which locators are missing a `.describe()` label, and which
+locators are declared directly in test files instead of a Page Object.
+
+The locator-hygiene checks scan `testDir` (default `tests`, override via
+`qash.config.json` above). If your tests live somewhere else, point at it
+directly instead:
+
+```sh
+npx qash-playwright checkup --dir <path-to-your-tests>
+```
+
+Connectivity and `actionTimeout` are checked either way, `--dir` only affects
+the two locator-scanning checks.
+
+## Running your tests
+
+Run them the same way you always have:
+
+```sh
+npx playwright test
+```
+
+The first time you point QASH at a suite, run a single file rather than the
+whole thing (`npx playwright test path/to/one.spec.ts`) — a broken locator
+means a real AI call and a real wait the first time it's hit, so it's worth
+seeing how one file behaves before scaling up. Since this sends page content
+(accessibility tree, matched element attributes) to whichever provider you
+configured, start on a disposable/throwaway branch with a provider you're
+comfortable sending that content to, especially the first few times.
+
 ## Reports
 
 Every heal attempt is written to `qash-heal-report.json` and rendered as
@@ -150,34 +219,11 @@ still-broken locator every time you run again. `qash-playwright apply`
 (below) landing the fix into source is what actually stops paying for the
 same heal repeatedly, run after run.
 
-## `qash-playwright checkup`
-
-Validates your setup before you rely on it:
-
-```sh
-npx qash-playwright checkup
-```
-
-Checks provider connectivity (a real call, within your actual configured
-timeout), whether `actionTimeout` is set and has real headroom below your test
-`timeout`, which locators are missing a `.describe()` label, and which
-locators are declared directly in test files instead of a Page Object.
-
-The locator-hygiene checks scan `testDir` (default `tests`, override via
-`qash.config.json` — see below). If your tests live somewhere else, point at
-it directly instead:
-
-```sh
-npx qash-playwright checkup --dir <path-to-your-tests>
-```
-
-Connectivity and `actionTimeout` are checked either way, `--dir` only affects
-the two locator-scanning checks.
-
 ## `qash-playwright apply`
 
 A runtime heal is a point-in-time fix — it's only as durable as the AI's guess
-happened to be for that one run. `apply` reads every successful heal and
+happened to be for that one run. Once you're happy with what a heal actually
+did (check the reports above), `apply` reads every successful heal and
 rewrites the actual source line it came from, so future runs don't need to
 heal (or pay for an AI call) at all.
 
@@ -224,55 +270,6 @@ npx qash-playwright apply --only 2-4    # a range works too
 
 Nothing is ever committed automatically — review the diff yourself before
 committing, the same way you would any other code change.
-
-## Config file
-
-`qash.config.json` (optional) can override where QASH reads tests from and
-writes its report/cache:
-
-```json
-{
-  "testDir": "tests",
-  "reportJsonPath": "qash-heal-report.json",
-  "reportHtmlPath": "qash-heal-report.html",
-  "cachePath": ".qash-cache.json"
-}
-```
-
-## Trying it in an existing project
-
-To evaluate QASH against a real test suite rather than a fresh install:
-
-1. Build and pack it from source: `npm run build && npm pack` (produces
-   `qash-playwright-<version>.tgz` in this repo's root).
-2. In your test project: `npm install /path/to/qash-playwright-<version>.tgz`.
-   This adds it to `package.json`/`package-lock.json` like any other dependency.
-3. Set the QASH variables in your project's environment: if you already have
-   an `.env` file, add `HEALER_ENABLED`/`HEALER_PROVIDER`/the model variables
-   to it; otherwise copy `.env.example` to `.env` in your project root.
-4. Change **one test file's** import from `@playwright/test` to
-   `qash-playwright` (or from whatever custom fixture you were using before) —
-   start with a single file, not the whole suite, for your first try. If you
-   had a fixture whose only job was registering a self-healer on new
-   pages/tabs, it can be deleted once you've migrated off it — QASH covers
-   that automatically, no fixture needed.
-5. Check `use.actionTimeout` in `playwright.config.ts` (see above) — add it
-   if it isn't already set; QASH just reads whatever value is there.
-6. Run `npx qash-playwright checkup --dir <path-to-your-tests>` (the default
-   is `tests` — pass `--dir` if yours live elsewhere) to confirm the provider
-   is reachable and see any locator-hygiene warnings before running anything.
-7. Run just that one file (`npx playwright test path/to/that.spec.ts`), not
-   your whole suite — a broken locator adds a real AI call and a real wait
-   the first time it's hit, so validate on one file before scaling up. Check
-   `qash-heal-report.html` for the aggregate view, or your usual Playwright
-   report for the per-test annotations, to see what (if anything) got healed.
-8. Once you're happy with what a heal actually did, use `npx qash-playwright
-   apply` (see above) to land it in source permanently, rather than
-   re-healing (and re-paying for it) on every future run.
-
-Since this evaluates real, possibly-sensitive test flows, start with a
-disposable/throwaway branch and a provider you're comfortable sending page
-content to.
 
 ## Not in this version
 
