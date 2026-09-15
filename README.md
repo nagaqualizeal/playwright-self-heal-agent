@@ -164,12 +164,11 @@ timeout), whether `actionTimeout` is set and has real headroom below your test
 locators are declared directly in test files instead of a Page Object.
 
 The locator-hygiene checks scan `testDir` (default `tests`, override via
-`qash.config.json` — see below). Most real projects don't keep tests in a
-top-level `tests/` folder, so you'll usually need to point at wherever yours
-actually live:
+`qash.config.json` — see below). If your tests live somewhere else, point at
+it directly instead:
 
 ```sh
-npx qash-playwright checkup --dir src/tests
+npx qash-playwright checkup --dir <path-to-your-tests>
 ```
 
 Connectivity and `actionTimeout` are checked either way, `--dir` only affects
@@ -248,22 +247,20 @@ To evaluate QASH against a real test suite rather than a fresh install:
    `qash-playwright-<version>.tgz` in this repo's root).
 2. In your test project: `npm install /path/to/qash-playwright-<version>.tgz`.
    This adds it to `package.json`/`package-lock.json` like any other dependency.
-3. Add the QASH variables to your project's `.env` (most real projects already
-   have one for other keys — just add `HEALER_ENABLED`/`HEALER_PROVIDER`/the
-   model to it; copy `.env.example` instead only if you don't have an `.env` yet).
+3. Set the QASH variables in your project's environment: if you already have
+   an `.env` file, add `HEALER_ENABLED`/`HEALER_PROVIDER`/the model variables
+   to it; otherwise copy `.env.example` to `.env` in your project root.
 4. Change **one test file's** import from `@playwright/test` to
    `qash-playwright` (or from whatever custom fixture you were using before) —
    start with a single file, not the whole suite, for your first try. If you
    had a fixture whose only job was registering a self-healer on new
    pages/tabs, it can be deleted once you've migrated off it — QASH covers
    that automatically, no fixture needed.
-5. Make sure `use.actionTimeout` is set in `playwright.config.ts` (see above)
-   — most real configs already have one; QASH just reads it, nothing to add
-   if it's already there.
-6. Run `npx qash-playwright checkup --dir <your test folder>` (e.g. `src/tests`
-   — see above, the default `tests` folder usually won't match) to confirm
-   the provider is reachable and see any locator-hygiene warnings before
-   running anything.
+5. Check `use.actionTimeout` in `playwright.config.ts` (see above) — add it
+   if it isn't already set; QASH just reads whatever value is there.
+6. Run `npx qash-playwright checkup --dir <path-to-your-tests>` (the default
+   is `tests` — pass `--dir` if yours live elsewhere) to confirm the provider
+   is reachable and see any locator-hygiene warnings before running anything.
 7. Run just that one file (`npx playwright test path/to/that.spec.ts`), not
    your whole suite — a broken locator adds a real AI call and a real wait
    the first time it's hit, so validate on one file before scaling up. Check
