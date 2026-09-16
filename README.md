@@ -269,8 +269,13 @@ writes nothing, and the real thing that writes immediately:
 **Preview (`--dry-run`) — writes nothing to disk:**
 
 ```sh
-npx qash-playwright apply --dry-run --yes   # lists every heal; nothing written
+npx qash-playwright apply --dry-run   # lists every heal; nothing written
 ```
+
+In a real terminal this lists everything, then still asks "Apply which?" —
+type `stop` (or just press Enter) to exit without writing anything. Add
+`--yes` (`apply --dry-run --yes`) if you'd rather it just print the list and
+exit on its own, no keypress needed.
 
 **Apply for real — writes immediately, no prompts:**
 
