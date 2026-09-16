@@ -9,6 +9,7 @@ export type ProviderName = 'openai' | 'anthropic' | 'gemini' | 'ollama' | 'ollam
 export type QashConfig = {
   enabled: boolean;
   provider: ProviderName | null;
+  actionRecoveryEnabled: boolean;
   actionTimeoutMs: number;
   reportJsonPath: string;
   reportHtmlPath: string;
@@ -66,10 +67,17 @@ export function loadConfig(): QashConfig {
   const provider = (process.env.HEALER_PROVIDER || fileConfig.provider || null) as ProviderName | null;
   const enabledRaw = process.env.HEALER_ENABLED ?? fileConfig.enabled;
   const enabled = enabledRaw === undefined ? true : !['false', '0', false].includes(enabledRaw);
+  // Opposite default polarity from `enabled`, deliberately: this is a second, more speculative
+  // layer of intervention beyond selector healing (retrying an already-healed action with a
+  // different interaction tactic, e.g. `force: true`, which can act on an element in a way a real
+  // user couldn't), so it requires explicit opt-in rather than defaulting on.
+  const actionRecoveryRaw = process.env.HEALER_ACTION_RECOVERY_ENABLED ?? fileConfig.actionRecoveryEnabled;
+  const actionRecoveryEnabled = ['true', '1', true].includes(actionRecoveryRaw);
 
   cached = {
     enabled,
     provider,
+    actionRecoveryEnabled,
     actionTimeoutMs: resolveActionTimeoutFromPlaywrightConfig() ?? fileConfig.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS,
     reportJsonPath: path.resolve(fileConfig.reportJsonPath || 'qash-heal-report.json'),
     reportHtmlPath: path.resolve(fileConfig.reportHtmlPath || 'qash-heal-report.html'),

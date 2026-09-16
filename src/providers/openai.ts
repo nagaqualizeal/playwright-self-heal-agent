@@ -1,8 +1,11 @@
 import { loadConfig } from '../core/config';
-import { HealProvider, HealPromptPayload, LocatorSuggestion } from './types';
+import { HealProvider, HealPromptPayload, LocatorSuggestion, VisionPromptPayload, VisionPoint } from './types';
 import { SYSTEM_PROMPT, buildUserPrompt, extractJsonArray } from './prompt';
+import { VISION_SYSTEM_PROMPT, buildVisionUserPrompt, parseVisionResponse } from './visionPrompt';
 
 export class OpenAiProvider implements HealProvider {
+  readonly supportsVision = true;
+
   async suggestLocators(payload: HealPromptPayload): Promise<LocatorSuggestion[]> {
     const { openai, actionTimeoutMs } = loadConfig();
     if (!openai.apiKey || !openai.model) return [];
@@ -36,6 +39,49 @@ export class OpenAiProvider implements HealProvider {
       return Array.isArray(parsed) ? parsed : parsed.suggestions || [];
     } catch {
       return [];
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async suggestElementFromImage(payload: VisionPromptPayload): Promise<VisionPoint | null> {
+    const { openai, actionTimeoutMs } = loadConfig();
+    if (!openai.apiKey || !openai.model) return null;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), actionTimeoutMs);
+
+    try {
+      const response = await fetch(`${openai.baseUrl}/chat/completions`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${openai.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: openai.model,
+          temperature: 0,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: VISION_SYSTEM_PROMPT },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: buildVisionUserPrompt(payload) },
+                { type: 'image_url', image_url: { url: `data:image/png;base64,${payload.imageBase64}` } },
+              ],
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) return null;
+      const data: any = await response.json();
+      const text = data.choices?.[0]?.message?.content || '';
+      return parseVisionResponse(text);
+    } catch {
+      return null;
     } finally {
       clearTimeout(timer);
     }

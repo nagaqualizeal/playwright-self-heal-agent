@@ -25,6 +25,10 @@ export type HealEntry = {
   description?: string | null;
   confidence?: number;
   reasoning?: string;
+  needsReview?: boolean;
+  reviewReason?: string;
+  usedActionRecovery?: boolean;
+  actionRecoveryTactic?: string;
   attempts?: HealAttempt[];
   finalFailureReason?: string;
   timestamp?: string;
@@ -121,6 +125,7 @@ function generateHtmlReport(data: HealEntry[]) {
   const failedCount = attempts.filter((d) => d.status === 'failed').length;
   const cacheHits = data.filter((d) => d.status === 'cache_hit').length;
   const successRate = attempts.length > 0 ? Math.round((successCount / attempts.length) * 100) : 0;
+  const needsReviewCount = data.filter((d) => d.needsReview).length;
 
   const rows = data
     .map((entry, idx) => {
@@ -144,8 +149,9 @@ function generateHtmlReport(data: HealEntry[]) {
         <td><code>${escapeHtml(entry.original)}</code></td>
         <td><code>${entry.healed ? escapeHtml(entry.healed) : '-'}</code></td>
         <td>${entry.status === 'success' ? '✅ Success' : entry.status === 'cache_hit' ? '⚡ Cache' : '❌ Failed'}</td>
-        <td>${escapeHtml(entry.strategy)}</td>
+        <td>${escapeHtml(entry.strategy)}${entry.usedActionRecovery ? ` <small>(recovered: ${escapeHtml(entry.actionRecoveryTactic || '')})</small>` : ''}</td>
         <td>${entry.confidence !== undefined ? (entry.confidence * 100).toFixed(0) + '%' : '-'}</td>
+        <td${entry.needsReview ? ` title="${escapeHtml(entry.reviewReason || 'Needs review')}"` : ''}>${entry.needsReview ? '⚠️ Review' : '-'}</td>
         <td style="color:${entry.status === 'failed' ? '#d32f2f' : '#2e7d32'};">${escapeHtml(failureReason)}</td>
       </tr>`;
     })
@@ -162,7 +168,7 @@ function generateHtmlReport(data: HealEntry[]) {
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#f5f5f5; color:#333; padding:20px; }
   .container { max-width:1500px; margin:0 auto; }
   h1 { margin-bottom:20px; padding-bottom:10px; border-bottom:3px solid #6a3de8; }
-  .stats { display:grid; grid-template-columns:repeat(5,1fr); gap:15px; margin-bottom:30px; }
+  .stats { display:grid; grid-template-columns:repeat(6,1fr); gap:15px; margin-bottom:30px; }
   .stat-card { background:white; padding:15px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,0.1); }
   .stat-label { font-size:12px; color:#999; text-transform:uppercase; margin-bottom:5px; }
   .stat-value { font-size:28px; font-weight:bold; }
@@ -187,11 +193,12 @@ function generateHtmlReport(data: HealEntry[]) {
     <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value failed">${failedCount}</div></div>
     <div class="stat-card"><div class="stat-label">Cache Reuses</div><div class="stat-value info">${cacheHits}</div></div>
     <div class="stat-card"><div class="stat-label">Success Rate</div><div class="stat-value">${successRate}%</div></div>
+    <div class="stat-card"><div class="stat-label">Needs Review</div><div class="stat-value" style="color:#c77700;">${needsReviewCount}</div></div>
   </div>
   <table>
     <thead>
       <tr>
-        <th>#</th><th>Test</th><th>Page URL</th><th>Location</th><th>Original</th><th>Healed</th><th>Status</th><th>Strategy</th><th>Confidence</th><th>Failure Reason</th>
+        <th>#</th><th>Test</th><th>Page URL</th><th>Location</th><th>Original</th><th>Healed</th><th>Status</th><th>Strategy</th><th>Confidence</th><th>Review</th><th>Failure Reason</th>
       </tr>
     </thead>
     <tbody>${rows}</tbody>

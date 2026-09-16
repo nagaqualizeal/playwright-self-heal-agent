@@ -1,11 +1,14 @@
 import { loadConfig } from '../core/config';
-import { HealProvider, HealPromptPayload, LocatorSuggestion } from './types';
+import { HealProvider, HealPromptPayload, LocatorSuggestion, VisionPromptPayload, VisionPoint } from './types';
 import { SYSTEM_PROMPT, buildUserPrompt, extractJsonArray } from './prompt';
+import { VISION_SYSTEM_PROMPT, buildVisionUserPrompt, parseVisionResponse } from './visionPrompt';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 
 export class AnthropicProvider implements HealProvider {
+  readonly supportsVision = true;
+
   async suggestLocators(payload: HealPromptPayload): Promise<LocatorSuggestion[]> {
     const { anthropic, actionTimeoutMs } = loadConfig();
     if (!anthropic.apiKey || !anthropic.model) return [];
@@ -36,6 +39,49 @@ export class AnthropicProvider implements HealProvider {
       return extractJsonArray(text);
     } catch {
       return [];
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async suggestElementFromImage(payload: VisionPromptPayload): Promise<VisionPoint | null> {
+    const { anthropic, actionTimeoutMs } = loadConfig();
+    if (!anthropic.apiKey || !anthropic.model) return null;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), actionTimeoutMs);
+
+    try {
+      const response = await fetch(ANTHROPIC_URL, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'x-api-key': anthropic.apiKey,
+          'anthropic-version': ANTHROPIC_VERSION,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: anthropic.model,
+          max_tokens: 256,
+          system: VISION_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'image', source: { type: 'base64', media_type: 'image/png', data: payload.imageBase64 } },
+                { type: 'text', text: buildVisionUserPrompt(payload) },
+              ],
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) return null;
+      const data: any = await response.json();
+      const text = data.content?.[0]?.text || '';
+      return parseVisionResponse(text);
+    } catch {
+      return null;
     } finally {
       clearTimeout(timer);
     }

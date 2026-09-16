@@ -22,7 +22,8 @@ function annotationType(status: HealEntry['status']): string {
 
 function summarize(entry: HealEntry): string {
   if (entry.status === 'success' || entry.status === 'cache_hit') {
-    return `${entry.action} on "${entry.original}" → ${entry.healed}`;
+    const reviewSuffix = entry.needsReview ? ` [needs review: ${entry.reviewReason}]` : '';
+    return `${entry.action} on "${entry.original}" → ${entry.healed}${reviewSuffix}`;
   }
   return `${entry.action} on "${entry.original}": ${entry.finalFailureReason || 'no usable locator found'}`;
 }
