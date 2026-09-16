@@ -12,8 +12,11 @@ QASH isn't published to the public npm registry yet, so for now it's installed
 from a local build rather than a plain `npm install qash-playwright`:
 
 ```sh
-# Build and pack it from source (in this repo):
-npm run build && npm pack
+# Build and pack it from source (in this repo) — run as two separate
+# commands, not chained with && (Windows PowerShell doesn't support that
+# as a statement separator; this works in every shell):
+npm run build
+npm pack
 # → produces qash-playwright-<version>.tgz
 
 # In your test project:
