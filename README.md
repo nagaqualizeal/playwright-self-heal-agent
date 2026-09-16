@@ -263,13 +263,28 @@ everything unreviewed. An explicit selection (a number, a list, a range)
 still writes for real even under `--dry-run`; that's deliberate; use it to
 apply specific ones now while previewing the rest before deciding on them.
 
-For non-interactive/CI use:
+For non-interactive/CI use, there are two distinct commands — a preview that
+writes nothing, and the real thing that writes immediately:
+
+**Preview (`--dry-run`) — writes nothing to disk:**
 
 ```sh
-npx qash-playwright apply --yes         # write everything, no prompts
-npx qash-playwright apply --only 1,3    # write specific ones, no prompts
+npx qash-playwright apply --dry-run --yes   # lists every heal; nothing written
+```
+
+**Apply for real — writes immediately, no prompts:**
+
+```sh
+npx qash-playwright apply --yes         # writes everything
+npx qash-playwright apply --only 1,3    # writes just items 1 and 3
 npx qash-playwright apply --only 2-4    # a range works too
 ```
+
+`--dry-run` only disables the bulk `--yes`/`all` shortcut (as above) — it has
+no effect on `--only`. **`--only` always writes for real, dry-run or not** —
+there's no flag combination that previews a specific selection without
+writing it; `--dry-run` alone (no `--yes`, no `--only`) is the only way to
+see the full list without writing anything.
 
 Nothing is ever committed automatically — review the diff yourself before
 committing, the same way you would any other code change.
