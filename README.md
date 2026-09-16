@@ -1,8 +1,9 @@
 # QASH — Qualizeal Automation Self Healer
 
 AI-powered self-healing for Playwright locators. When a `click`, `fill`, or similar
-action fails because its locator broke, QASH captures the page's accessibility
-tree, asks a configured AI provider to find the element's new location, retries
+action fails because its locator broke, QASH first tries to match it for free
+against the page's accessibility tree, then — only if that's not confident enough
+— asks a configured AI provider to point at the element's new location, retries
 the action, and — if it worked — caches the fix so the same call site doesn't
 pay for another AI call again within that run.
 
@@ -111,6 +112,52 @@ If you skip `.describe()` but name your locator variables descriptively
 (`txtUsername`, `submitButton`), QASH decodes that name into the same kind of
 description for free — `.describe()` still wins when both are present.
 
+`.describe()` (or a decodable variable name) is the single most leveraged
+piece of information you can give QASH — it's the *only* signal the free
+rule-based pass below has to work with, and it's what turns the AI pass from
+"guess from a dead selector" into "confirm a stated intent."
+
+## How a heal is resolved
+
+A broken locator goes through up to three passes, cheapest first, each one
+only reached if the previous one couldn't confidently resolve it:
+
+1. **Rule-based matching (free, no AI call).** Matches the element's
+   description directly against the accessibility tree using plain text
+   scoring — no model, no network, no cost. It only accepts a match when it's
+   unambiguous; anything less certain is left alone rather than guessed at, so
+   it falls through to the next pass. This is what heals the common case — an
+   id/class changed but the visible label or accessible name didn't — for
+   free and near-instantly.
+2. **AI, ref-based.** The accessibility tree is captured with Playwright's
+   `mode: 'ai'`, which tags every node with a `[ref=eN]` id. The AI is asked
+   to point at the target node's ref rather than write a locator string
+   itself — a ref resolves via Playwright's own `aria-ref=` locator engine to
+   the literal node the tree enumerated, so it can't be subtly wrong the way
+   a hand-written selector guess can. (The AI can still fall back to writing
+   a locator string itself — `getByRole`, `getByText`, etc. — when it can't
+   confidently map the failure to a single ref.) Since a ref is only valid
+   for the current page load, a separate deterministic step then reads the
+   *confirmed* element's own real attributes — test id, role + accessible
+   name, placeholder, visible text, id, in that preference order — and builds
+   a normal, portable locator string from them. That's what actually gets
+   cached and reported; the ref itself never is.
+3. **Vision fallback (last resort).** Only reached when both passes above
+   found nothing, and only for a provider that supports it (OpenAI and
+   Anthropic today — see [Providers](#providers) below). Takes a full-page
+   screenshot, asks the AI to point at the element visually, resolves that
+   point back to a real DOM node via `elementFromPoint`, and runs the same
+   durable-locator derivation as the ref-based pass on whatever it found. Not
+   guaranteed to produce a durable fix (a decorative element with no name,
+   role, or id has nothing to derive from), but the *action* still succeeds
+   for that run either way. Scoped to the main page only, not content inside
+   an `<iframe>`.
+
+Whichever pass succeeds, the result is validated against the live page before
+anything is trusted: a strict pass (exactly one match) is preferred; a
+relaxed pass (best candidate among several matches, closest to the
+description) is only used if strict finds nothing.
+
 ## What gets healed, and what never does
 
 QASH only ever touches `click`, `fill`, `check`, `uncheck`, `selectOption`,
@@ -132,6 +179,67 @@ the action fails:
   locator for something that shouldn't exist." `waitFor({ state: 'visible' }
   )` (or the default `'attached'`), the common "wait for it, then interact"
   pattern, is healed like any other action.
+
+If your own code deliberately treats a wait as optional (wrapped in a
+`try`/`catch` that swallows the failure, e.g. a spinner/loading-indicator
+check that's expected to sometimes not fire), be aware QASH can't distinguish
+that intent from a genuinely broken locator — it will still attempt to heal
+it. There's no per-call opt-out for this today.
+
+## Action recovery (opt-in)
+
+Sometimes a healed locator resolves to a real, visible element, but the
+*action* on it still fails — mid-animation, momentarily covered, or scrolled
+out of view. By default QASH tries the next candidate (or gives up) at that
+point. Turning on action recovery adds one more step first: it retries the
+same action against the same element using a fixed, ordered set of tactics —
+scroll into view, then a short settle wait, then (for actions that support
+it) `force: true` — and uses whichever one works.
+
+```sh
+HEALER_ACTION_RECOVERY_ENABLED=true
+```
+
+Off by default, deliberately: unlike swapping in a different locator,
+`force: true` can make an action succeed in a way a real user couldn't
+actually trigger, so this is a second, more speculative layer of
+intervention you opt into rather than one QASH applies silently. A heal that
+needed recovery is always flagged in the report (see **`needsReview`**
+below) so it's easy to find and double-check.
+
+## `needsReview`
+
+Not every successful heal is equally trustworthy. Each one is flagged
+`needsReview: true`, with a plain-English reason, when any of the following
+is true:
+
+- it only resolved via the **relaxed** pass (multiple elements matched; a
+  best-candidate guess was used, not an exact single match),
+- the source's own confidence was **low** (under 60%),
+- it fell back to a **CSS/XPath** selector instead of a semantic one,
+- the durable-locator derivation only had a **weak** signal to work with
+  (plain visible text or a bare `id`, rather than a test id or role + name),
+  or
+- the action needed **recovery** (see above) to actually complete.
+
+This shows up as a "Review" column in the HTML report, a "Needs Review" stat
+card, and `[needs review: ...]` in the native Playwright report annotation.
+Treat it as "this one's worth a human glance before you fully trust it" —
+distinct from a hard failure, which is reported separately.
+
+## Providers
+
+| Provider | Text-based healing | Vision fallback | Auth |
+|---|---|---|---|
+| OpenAI | ✅ | ✅ | API key |
+| Anthropic | ✅ | ✅ | API key |
+| Gemini | ✅ | — | API key |
+| Ollama (cloud) | ✅ | — | API key |
+| Ollama (self-hosted) | ✅ | — | none |
+
+Vision fallback is currently only wired up for OpenAI and Anthropic, since
+both already support image input in the same chat/messages API this project
+uses for text. Gemini and Ollama would need separate work to get there.
 
 ## Config file
 
@@ -192,8 +300,12 @@ comfortable sending that content to, especially the first few times.
 Every heal attempt is written to `qash-heal-report.json` and rendered as
 `qash-heal-report.html`, reset at the start of each test run. Each entry
 records the test name, the **page URL** the failure happened on, the source
-`file:line` the locator was declared at, the original and healed locator, and
-— on failure — why every candidate was rejected.
+`file:line` the locator was declared at, the original and healed locator,
+whether it needs review (and why — see **`needsReview`** above), whether
+action recovery was needed (and which tactic worked), and — on failure — why
+every candidate was rejected. The HTML dashboard adds stat cards (success,
+failed, cache reuses, success rate, needs review) and a "Review" column
+alongside the usual table.
 
 The same information is also mirrored into **Playwright's own HTML report**
 (`playwright-report/index.html`, or whatever `reporter` your project
@@ -210,7 +322,15 @@ selector text alone — so two different pages that happen to share a broken
 selector never cross-apply a fix computed for the wrong element. A cache hit
 skips both the AI call and, for locator-based actions, the wait itself: the
 cached locator is tried immediately instead of waiting through the full
-`actionTimeout` first.
+`actionTimeout` first. The confidence and match mode (strict/relaxed) that
+earned the original heal ride along in the cache entry too, so a cache hit
+reports the same `needsReview` status the original heal did — reusing a fix
+doesn't make it look more trustworthy than it actually is.
+
+A cached locator is only trusted once the action it's replaying actually
+succeeds on it (with action recovery, if enabled, getting a chance first) —
+if it resolves but still can't be acted on, the entry is invalidated and
+QASH falls through to a fresh heal instead of failing the test outright.
 
 The cache is scoped to **one run**, not persisted indefinitely: within a
 single `npx playwright test` invocation, every test shares it (test 2 reuses
@@ -296,9 +416,13 @@ committing, the same way you would any other code change.
 
 ## Not in this version
 
-- Vision-based (screenshot) healing — text/accessibility-tree healing only, for now.
+- Vision fallback for Gemini or Ollama — only OpenAI and Anthropic implement it today.
 - Subscription-based providers (using an existing Claude Code / GitHub Copilot
-  login instead of an API key) — the four providers above all use a plain API key.
+  login instead of an API key) — the providers above all use a plain API key.
+- Per-heal token-usage/cost tracking in the report.
+- A per-call opt-out for healing (e.g. marking a specific `waitFor` as
+  "optional, never heal this") — see the note at the end of **What gets
+  healed, and what never does** above.
 - A dedicated Cucumber integration — `bind(page)` works from any runner's own
   hooks today, but there's no packaged Cucumber-specific wiring yet.
 

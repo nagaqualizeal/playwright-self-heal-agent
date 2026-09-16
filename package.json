@@ -1,6 +1,6 @@
 {
   "name": "qash-playwright",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "QASH (Qualizeal Automation Self Healer) — AI-powered self-healing for Playwright locators.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
