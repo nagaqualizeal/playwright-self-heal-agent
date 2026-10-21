@@ -15,6 +15,7 @@ import { HealProvider } from '../providers/types';
 import { captureFullPageScreenshot, tagElementAtVisionPoint, visionTagSelector, cleanupVisionTag } from './vision';
 import { SHORT_TIMEOUT } from './executeAction';
 import { deriveDurableLocator } from './durableLocator';
+import { loadConfig } from './config';
 
 export type CacheProbeRequest = {
   page: Page;
@@ -28,7 +29,6 @@ export type CacheProbeRequest = {
 
 export type HealRequest = CacheProbeRequest & {
   error: any;
-  actionOptions?: { state?: string };
 };
 
 function describeFailure(locator: Locator, location: SourceLocation | null) {
@@ -103,6 +103,7 @@ function scriptFailureReason(error: any): string {
 // cache hit skips the original action's full timeout wait entirely rather
 // than only skipping the AI call once that wait has already elapsed.
 export async function tryHealFromCache(req: CacheProbeRequest): Promise<{ ok: true; result: any } | { ok: false }> {
+  if (!loadConfig().enabled) return { ok: false };
   const location = req.sourceLocation;
   const { originalSelectorText, description } = describeFailure(req.originalLocator, location);
 
@@ -147,7 +148,7 @@ export async function tryHealFromCache(req: CacheProbeRequest): Promise<{ ok: tr
     }
   }
 
-  invalidateCachedHeal(originalSelectorText, location);
+  await invalidateCachedHeal(originalSelectorText, location);
   return { ok: false };
 }
 
@@ -237,7 +238,7 @@ async function attemptSuggestions(
               };
 
           if (healedCode) {
-            saveHeal(ctx.originalSelectorText, ctx.location, healedCode, {
+            await saveHeal(ctx.originalSelectorText, ctx.location, healedCode, {
               confidence: suggestion.confidence,
               mode: passLabel,
             });
@@ -329,7 +330,7 @@ async function tryVisionFallback(
   }
 
   if (derived) {
-    saveHeal(ctx.originalSelectorText, ctx.location, derived.code);
+    await saveHeal(ctx.originalSelectorText, ctx.location, derived.code);
   }
 
   await logHeal({
@@ -356,7 +357,10 @@ async function tryVisionFallback(
 }
 
 export async function heal(req: HealRequest): Promise<any> {
-  const classification = classifyFailure(req.error, req.method, req.actionOptions);
+  // Backstop for a page wrapped before healing was switched off (e.g. a long-lived bind()).
+  if (!loadConfig().enabled) throw req.error;
+
+  const classification = classifyFailure(req.error);
   if (classification !== 'heal') {
     throw req.error;
   }

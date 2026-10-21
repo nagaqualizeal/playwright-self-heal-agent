@@ -1,4 +1,4 @@
-export type FailureClassification = 'heal' | 'skip-actionability' | 'skip-negative-wait' | 'skip-unrelated';
+export type FailureClassification = 'heal' | 'skip-actionability' | 'skip-unrelated';
 
 // Playwright's own action error text includes a call log. When the element was
 // actually found, that log contains a line like `locator resolved to <button ...>`
@@ -10,18 +10,7 @@ const RESOLVED_TO_ELEMENT = /resolved to <\w/i;
 
 const LOCATOR_FAILURE_HINTS = /not found|no element|strict mode violation|timeout/i;
 
-export function classifyFailure(
-  error: any,
-  method: string,
-  actionOptions?: { state?: string }
-): FailureClassification {
-  // A wait that's confirming something is gone (hidden/detached) succeeding at
-  // "timing out" may just mean the negative outcome is correct — there's no
-  // such thing as "a better locator for something that shouldn't be there".
-  if (method === 'waitFor' && (actionOptions?.state === 'hidden' || actionOptions?.state === 'detached')) {
-    return 'skip-negative-wait';
-  }
-
+export function classifyFailure(error: any): FailureClassification {
   if (!error) return 'heal';
 
   const message = String(error.message || '');

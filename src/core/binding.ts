@@ -1,10 +1,16 @@
 import { Page, Locator, FrameLocator, BrowserContext } from '@playwright/test';
 import { heal, tryHealFromCache } from './heal';
 import { captureCallSite, SourceLocation } from './sourceLocation';
+import { loadConfig } from './config';
 
+// `waitFor` is deliberately absent: it's a readiness check, not an interaction.
+// Healing it would let a wait on a removed element "succeed" against a
+// look-alike, hiding the very defect the wait exists to surface — so it passes
+// straight through and fails with Playwright's own error, like expect(...) and
+// isVisible() do.
 const ACTION_METHODS = new Set([
   'click', 'dblclick', 'fill', 'check', 'uncheck', 'selectOption',
-  'press', 'type', 'hover', 'tap', 'focus', 'waitFor',
+  'press', 'type', 'hover', 'tap', 'focus',
   'scrollIntoViewIfNeeded', 'setInputFiles',
 ]);
 
@@ -32,11 +38,6 @@ type Ctx = {
 const knownProxies = new WeakSet<object>();
 const pageProxies = new WeakMap<Page, Page>();
 const contextProxies = new WeakMap<BrowserContext, BrowserContext>();
-
-function extractActionOptions(args: any[]): { state?: string } | undefined {
-  const last = args[args.length - 1];
-  return last && typeof last === 'object' && !Array.isArray(last) ? last : undefined;
-}
 
 export function wrapLocator(raw: Locator, ctx: Ctx): Locator {
   if (knownProxies.has(raw)) return raw;
@@ -68,7 +69,6 @@ export function wrapLocator(raw: Locator, ctx: Ctx): Locator {
               method: prop,
               args,
               error,
-              actionOptions: extractActionOptions(args),
               sourceLocation: ctx.sourceLocation,
               testName: ctx.getTestName(),
             });
@@ -209,7 +209,6 @@ export function wrapPage(raw: Page): Page {
               method,
               args: rest,
               error,
-              actionOptions: extractActionOptions(rest),
               sourceLocation,
               testName: getTestName(),
             });
@@ -318,5 +317,6 @@ export function bindContext(raw: BrowserContext): BrowserContext {
 
 /** Manual entry point for code not using the `test` fixture export. */
 export function bind(page: Page): Page {
+  if (!loadConfig().enabled) return page;
   return wrapPage(page);
 }

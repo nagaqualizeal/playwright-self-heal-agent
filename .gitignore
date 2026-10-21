@@ -40,6 +40,9 @@ qash-heal-report.json
 qash-heal-report.html
 .qash-cache.json
 .qash-cache.json.run-lock
+*.lock
+*.tmp
+*.corrupt-*
 qash.config.json
 *.tgz
 playwright-report/

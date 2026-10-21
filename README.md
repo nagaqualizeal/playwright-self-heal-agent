@@ -42,6 +42,19 @@ OPENAI_API_KEY=sk-...
 
 See `.env.example` for the other providers' variables.
 
+`HEALER_ENABLED=false` switches QASH off completely: tests get the plain
+Playwright `page` and `context`, so nothing is healed (not even by the free
+rule-based pass), no cache is read, and the previous run's report is left
+untouched. A broken locator then fails with Playwright's original error,
+exactly as if `test` were imported from `@playwright/test`. (Before 0.4.0 it
+only disabled the AI provider.) Leaving `HEALER_PROVIDER` unset while enabled
+keeps healing rule-based only, with no page data leaving the machine.
+
+The heal report and cache are safe under parallel workers: every update is
+made under a short cross-process file lock and written atomically, so every
+heal from every worker lands in the report. While a run is in progress you may
+see transient `*.lock` / `*.tmp` files next to them.
+
 ## Set `actionTimeout` in your `playwright.config.ts`
 
 Playwright lets a broken locator retry silently for your entire test `timeout`
@@ -161,30 +174,27 @@ description) is only used if strict finds nothing.
 ## What gets healed, and what never does
 
 QASH only ever touches `click`, `fill`, `check`, `uncheck`, `selectOption`,
-`press`, `type`, `hover`, `tap`, `focus`, `waitFor`, `scrollIntoViewIfNeeded`,
-and `setInputFiles`. Everything else — `isVisible`, `isHidden`, `count`, `all`,
-and every `expect(...)` assertion — is never intercepted at all, so a
-conditional check like `if (await locator.isVisible())` is never healed and
-never affected by QASH being installed.
+`press`, `type`, `hover`, `tap`, `focus`, `scrollIntoViewIfNeeded`, and
+`setInputFiles`. Everything else — `waitFor`, `isVisible`, `isHidden`,
+`count`, `all`, and every `expect(...)` assertion — is never intercepted at
+all, so a conditional check like `if (await locator.isVisible())` is never
+healed and never affected by QASH being installed.
 
-Within the methods above, two situations are deliberately skipped even when
-the action fails:
+`waitFor()` is never healed in any state — the default, `'visible'`,
+`'attached'`, `'hidden'` or `'detached'`. A wait is a readiness check, not an
+interaction: if the element it waits for was genuinely removed, healing it
+onto a similar-looking element would hide exactly the defect the wait exists
+to catch. A `waitFor` on a broken or missing locator fails with Playwright's
+original error, the same as without QASH. The common page-object pattern of
+`await el.waitFor({ state: 'visible' }); await el.click();` therefore fails
+honestly at the wait when the element is gone. (Since 0.4.0 — earlier
+versions healed `waitFor` in the `'visible'`/`'attached'` states.)
 
-- **The element was found but couldn't be acted on** (hidden, disabled,
-  covered, still animating). Playwright's own error text says as much — in
-  that case the locator wasn't the problem, so swapping it can't fix it and
-  risks silently acting on the wrong element instead.
-- **A `waitFor({ state: 'hidden' | 'detached' })` times out.** That kind of
-  wait is confirming something is *gone* — there's no such thing as "a better
-  locator for something that shouldn't exist." `waitFor({ state: 'visible' }
-  )` (or the default `'attached'`), the common "wait for it, then interact"
-  pattern, is healed like any other action.
-
-If your own code deliberately treats a wait as optional (wrapped in a
-`try`/`catch` that swallows the failure, e.g. a spinner/loading-indicator
-check that's expected to sometimes not fire), be aware QASH can't distinguish
-that intent from a genuinely broken locator — it will still attempt to heal
-it. There's no per-call opt-out for this today.
+Within the interaction methods, one situation is deliberately skipped even
+when the action fails: **the element was found but couldn't be acted on**
+(hidden, disabled, covered, still animating). Playwright's own error text says
+as much — in that case the locator wasn't the problem, so swapping it can't
+fix it and risks silently acting on the wrong element instead.
 
 ## Action recovery (opt-in)
 
@@ -420,9 +430,8 @@ committing, the same way you would any other code change.
 - Subscription-based providers (using an existing Claude Code / GitHub Copilot
   login instead of an API key) — the providers above all use a plain API key.
 - Per-heal token-usage/cost tracking in the report.
-- A per-call opt-out for healing (e.g. marking a specific `waitFor` as
-  "optional, never heal this") — see the note at the end of **What gets
-  healed, and what never does** above.
+- A per-call opt-out for healing (e.g. marking a specific `click` as "never
+  heal this").
 - A dedicated Cucumber integration — `bind(page)` works from any runner's own
   hooks today, but there's no packaged Cucumber-specific wiring yet.
 

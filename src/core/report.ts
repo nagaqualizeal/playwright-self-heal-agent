@@ -2,6 +2,7 @@ import fs from 'fs';
 import { loadConfig } from './config';
 import { attachToNativeReport } from './nativeReport';
 import { resetCache } from './cache';
+import { withFileLock, writeFileAtomic, quarantineCorruptFile } from './fileLock';
 
 export type HealAttempt = {
   strategy: string;
@@ -34,10 +35,12 @@ export type HealEntry = {
   timestamp?: string;
 };
 
-export function resetReport() {
+export async function resetReport() {
   const { reportJsonPath, reportHtmlPath } = loadConfig();
-  fs.writeFileSync(reportJsonPath, '[]');
-  if (fs.existsSync(reportHtmlPath)) fs.unlinkSync(reportHtmlPath);
+  await withFileLock(reportJsonPath, async () => {
+    await writeFileAtomic(reportJsonPath, '[]');
+    fs.rmSync(reportHtmlPath, { force: true });
+  });
 }
 
 let checkedThisWorker = false;
@@ -47,9 +50,9 @@ let checkedThisWorker = false;
 // one `npx playwright test` invocation share the same parent process id,
 // though, so that id doubles as a cheap run identifier: the first worker to
 // notice it doesn't match the last recorded run clears the report (and the
-// cache — see below) for everyone. A harmless double-reset race at the very
-// start of a run (two workers starting near-simultaneously) is the only
-// downside, and it's a no-op difference from a single reset.
+// cache — see below) for everyone. The check-and-reset runs under a lock:
+// without it, a worker could read the run-lock file mid-write, see it empty,
+// decide a new run had started, and wipe every heal already logged this run.
 //
 // The cache is deliberately wiped here too, on every new run (single test or
 // full suite alike) — not just once per calendar day or left to grow forever.
@@ -57,60 +60,67 @@ let checkedThisWorker = false;
 // (nothing here clears it mid-run), but the next separate invocation starts
 // from a clean slate, so "did this actually heal just now" is never masked
 // by a stale hit from an earlier run.
-export function ensureFreshRunState() {
+export async function ensureFreshRunState() {
   if (checkedThisWorker) return;
   checkedThisWorker = true;
 
-  const lockPath = `${loadConfig().cachePath}.run-lock`;
+  const runLockPath = `${loadConfig().cachePath}.run-lock`;
   const currentRunId = String(process.ppid);
-  let previousRunId: string | null = null;
-  try {
-    previousRunId = fs.readFileSync(lockPath, 'utf-8').trim();
-  } catch {
-    // No lock file yet — treat as a new run.
-  }
 
-  if (previousRunId !== currentRunId) {
-    resetReport();
-    resetCache();
+  await withFileLock(runLockPath, async () => {
+    let previousRunId: string | null = null;
     try {
-      fs.writeFileSync(lockPath, currentRunId);
+      previousRunId = fs.readFileSync(runLockPath, 'utf-8').trim();
     } catch {
-      // Best-effort — a failure here just means the next worker resets again.
+      // No run-lock file yet — treat as a new run.
     }
-  }
+
+    if (previousRunId !== currentRunId) {
+      await resetReport();
+      await resetCache();
+      await writeFileAtomic(runLockPath, currentRunId);
+    }
+  });
 }
 
+// Callers hold the report lock, so the file can't be mid-write here.
 function readEntries(): HealEntry[] {
   const { reportJsonPath } = loadConfig();
+  if (!fs.existsSync(reportJsonPath)) return [];
+  const content = fs.readFileSync(reportJsonPath, 'utf-8').trim();
+  if (!content) return [];
   try {
-    if (!fs.existsSync(reportJsonPath)) return [];
-    const content = fs.readFileSync(reportJsonPath, 'utf-8').trim();
-    return content ? JSON.parse(content) : [];
-  } catch {
+    return JSON.parse(content);
+  } catch (error) {
+    quarantineCorruptFile(reportJsonPath, error);
     return [];
   }
 }
 
 export async function logHeal(entry: HealEntry): Promise<void> {
   const { reportJsonPath } = loadConfig();
-  const data = readEntries();
 
-  const isDuplicate = data.some(
-    (d) =>
-      d.original === entry.original &&
-      d.test === entry.test &&
-      d.action === entry.action &&
-      d.status === entry.status &&
-      d.location === entry.location
-  );
-  if (isDuplicate) return;
+  const newEntry = await withFileLock(reportJsonPath, async () => {
+    const data = readEntries();
 
-  const newEntry = { ...entry, timestamp: new Date().toISOString() };
-  data.push(newEntry);
-  fs.writeFileSync(reportJsonPath, JSON.stringify(data, null, 2));
-  generateHtmlReport(data);
-  await attachToNativeReport(newEntry);
+    const isDuplicate = data.some(
+      (d) =>
+        d.original === entry.original &&
+        d.test === entry.test &&
+        d.action === entry.action &&
+        d.status === entry.status &&
+        d.location === entry.location
+    );
+    if (isDuplicate) return null;
+
+    const added = { ...entry, timestamp: new Date().toISOString() };
+    data.push(added);
+    await writeFileAtomic(reportJsonPath, JSON.stringify(data, null, 2));
+    await generateHtmlReport(data);
+    return added;
+  });
+
+  if (newEntry) await attachToNativeReport(newEntry);
 }
 
 function escapeHtml(str: string): string {
@@ -118,7 +128,7 @@ function escapeHtml(str: string): string {
   return String(str ?? '').replace(/[&<>"']/g, (s) => map[s]);
 }
 
-function generateHtmlReport(data: HealEntry[]) {
+async function generateHtmlReport(data: HealEntry[]) {
   const { reportHtmlPath } = loadConfig();
   const attempts = data.filter((d) => d.status !== 'cache_hit');
   const successCount = attempts.filter((d) => d.status === 'success').length;
@@ -207,5 +217,5 @@ function generateHtmlReport(data: HealEntry[]) {
 </body>
 </html>`;
 
-  fs.writeFileSync(reportHtmlPath, html);
+  await writeFileAtomic(reportHtmlPath, html);
 }
